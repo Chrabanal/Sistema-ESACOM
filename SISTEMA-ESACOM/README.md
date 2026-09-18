@@ -25,4 +25,4 @@ No versionar:
 
 1. Cargar esta estructura en `main`.
 2. Crear rama `develop`.
-3. Crear ramas individuales del Bloque 1 para Charlyn, Carmen y Kevin.
+3. Crear ramas individuales del Bloque 1 para Charlien Rabanal, Carmen López y Kevin Stuardo.
