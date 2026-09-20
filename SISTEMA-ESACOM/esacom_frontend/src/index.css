@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+@theme {
+  --color-esacom-lime: #A6CE39;
+  --color-esacom-lime-dark: #7FA81D;
+  --color-esacom-lime-light: #F2F8DF;
+  --color-esacom-ink: #202328;
+  --color-esacom-graphite: #5F6368;
+  --color-esacom-silver: #A7A9AC;
+  --color-esacom-red: #D92D20;
+  --color-esacom-red-dark: #A61B12;
+  --color-esacom-red-light: #FEF0EE;
+  --color-esacom-green: #178A46;
+  --color-esacom-orange: #D97706;
+  --color-esacom-blue: #2563EB;
+  --font-sans: "Inter", "Segoe UI", Arial, sans-serif;
+}
+
+:root { color-scheme: light; --esacom-page: #F6F7F8; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: var(--esacom-page); }
+body {
+  @apply text-gray-900 antialiased;
+  min-width: 320px; margin: 0; overscroll-behavior-y: none;
+  background: radial-gradient(circle at 12% -5%, rgba(166,206,57,.10), transparent 26rem), #F6F7F8;
+}
+button,a,input,select { -webkit-tap-highlight-color: transparent; }
+button,a { touch-action: manipulation; }
+::selection { background: rgba(166,206,57,.28); color:#202328; }
+
+@layer components {
+  .input-soporte { @apply w-full rounded-xl border border-gray-300 bg-white px-3 py-2.5 text-sm outline-none transition; }
+  .input-soporte:focus { border-color:#A6CE39; box-shadow:0 0 0 3px rgba(166,206,57,.16); }
+  .esacom-card { @apply rounded-2xl border border-gray-200 bg-white shadow-sm; }
+  .esacom-focus { @apply outline-none transition; }
+  .esacom-focus:focus { border-color:#A6CE39; box-shadow:0 0 0 3px rgba(166,206,57,.16); }
+  .esacom-primary-btn { @apply inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50; background:#202328; color:white; }
+  .esacom-primary-btn:hover { background:#111318; }
+  .esacom-primary-btn:focus-visible { outline:3px solid rgba(166,206,57,.38); outline-offset:2px; }
+  .esacom-brand-btn { @apply inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50; background:#A6CE39; color:#202328; }
+  .esacom-brand-btn:hover { background:#98BF2D; }
+}
+.scrollbar-none { scrollbar-width:none; }
+.scrollbar-none::-webkit-scrollbar { display:none; }
+@media (max-width:640px) { body { background:#F8F9FA; } input,select,textarea { font-size:16px !important; } }
