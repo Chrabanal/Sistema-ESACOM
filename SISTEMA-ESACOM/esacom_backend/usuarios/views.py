@@ -194,6 +194,11 @@ class UsuarioSoporteViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def reset_password(self, request, pk=None):
         usuario = self.get_object()
+        if usuario.is_superuser and not request.user.is_superuser:
+            return Response(
+                {"detail": "Un usuario de Soporte no puede modificar un superusuario técnico."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         password = (request.data.get("password") or "").strip()
         generada = False
         if not password:
