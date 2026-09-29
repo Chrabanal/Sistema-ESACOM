@@ -22,9 +22,12 @@ function Inicio() {
   );
 }
 
-function DashboardProtegido() {
+function DashboardProtegido({ cargosPermitidos, permisoRequerido }) {
   return (
-    <RutaProtegida>
+    <RutaProtegida
+      cargosPermitidos={cargosPermitidos}
+      permisoRequerido={permisoRequerido}
+    >
       <DashboardBase />
     </RutaProtegida>
   );
@@ -40,12 +43,50 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/sin-acceso" element={<SinAcceso />} />
 
-          <Route path="/dashboard" element={<DashboardProtegido />} />
-          <Route path="/supervisor" element={<DashboardProtegido />} />
-          <Route path="/mi-portal" element={<DashboardProtegido />} />
-          <Route path="/soporte" element={<DashboardProtegido />} />
-          <Route path="/operaciones" element={<DashboardProtegido />} />
-          <Route path="/contabilidad" element={<DashboardProtegido />} />
+          <Route
+            path="/dashboard"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["GERENCIA"]}
+                permisoRequerido="dashboard_gerencia"
+              />
+            }
+          />
+          <Route
+            path="/supervisor"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["SUPERVISOR"]}
+                permisoRequerido="mi_equipo"
+              />
+            }
+          />
+          <Route
+            path="/mi-portal"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["EJECUTIVO"]}
+                permisoRequerido="mi_portal"
+              />
+            }
+          />
+          <Route
+            path="/soporte"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["SOPORTE"]}
+                permisoRequerido="usuarios"
+              />
+            }
+          />
+          <Route
+            path="/operaciones"
+            element={<DashboardProtegido cargosPermitidos={["OPERACIONES"]} />}
+          />
+          <Route
+            path="/contabilidad"
+            element={<DashboardProtegido cargosPermitidos={["CONTABILIDAD"]} />}
+          />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
