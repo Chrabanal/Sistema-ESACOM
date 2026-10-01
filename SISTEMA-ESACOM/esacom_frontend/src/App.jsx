@@ -1,4 +1,4 @@
-﻿import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import RutaProtegida from "./components/RutaProtegida";
@@ -11,6 +11,12 @@ import PortalEjecutivo from "./pages/PortalEjecutivo";
 import PortalSupervisor from "./pages/PortalSupervisor";
 import DashboardGerencia from "./pages/DashboardGerencia";
 import DashboardSoporte from "./pages/DashboardSoporte";
+
+import Historico from "./pages/Historico";
+import AuditoriaKPI from "./pages/AuditoriaKPI";
+import SeguimientoEjecutivos from "./pages/SeguimientoEjecutivos";
+import SeguimientoBoletas from "./pages/SeguimientoBoletas";
+import Analisis from "./pages/Analisis";
 
 function Inicio() {
   const { user, cargando } = useAuth();
@@ -84,6 +90,64 @@ export default function App() {
                 permisoRequerido="mi_portal"
               >
                 <PortalEjecutivo />
+              </DashboardProtegido>
+            }
+          />
+
+          <Route
+            path="/historico"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["GERENCIA", "SUPERVISOR"]}
+              >
+                <Historico />
+              </DashboardProtegido>
+            }
+          />
+
+          <Route
+            path="/ejecutivos"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["GERENCIA", "SUPERVISOR"]}
+              >
+                <SeguimientoEjecutivos />
+              </DashboardProtegido>
+            }
+          />
+
+          <Route
+            path="/accionables"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["GERENCIA", "SUPERVISOR", "EJECUTIVO"]}
+                permisoRequerido="accionables"
+              >
+                <SeguimientoBoletas />
+              </DashboardProtegido>
+            }
+          />
+
+          <Route
+            path="/analisis"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["GERENCIA"]}
+                permisoRequerido="analisis"
+              >
+                <Analisis />
+              </DashboardProtegido>
+            }
+          />
+
+          <Route
+            path="/auditoria-kpi"
+            element={
+              <DashboardProtegido
+                cargosPermitidos={["GERENCIA"]}
+                permisoRequerido="auditoria_kpi"
+              >
+                <AuditoriaKPI />
               </DashboardProtegido>
             }
           />
