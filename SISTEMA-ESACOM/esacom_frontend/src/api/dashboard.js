@@ -41,3 +41,44 @@ export async function fetchDashboardGerencia() {
   const { data } = await client.get("/dashboard/gerencia/");
   return data;
 }
+/** Busca usuarios comerciales para la ficha KPI de Gerencia. */
+export async function buscarUsuarioGerencia(q) {
+  const { data } = await client.get("/dashboard/gerencia/usuarios/", { params: { q } });
+  return data.resultados || [];
+}
+
+/** KPI actual, producción actual e histórico del usuario seleccionado. */
+export async function fetchUsuarioGerenciaDetalle(id) {
+  const { data } = await client.get(`/dashboard/gerencia/usuarios/${id}/`);
+  return data;
+}
+
+
+/** Período abierto e histórico de cierres oficiales Claro por canal. */
+export async function fetchCierresKpiGerencia(canal = "FIJO") {
+  const { data } = await client.get("/dashboard/gerencia/cierres/", { params: { canal } });
+  return data;
+}
+
+/** Desglose congelado de un cierre oficial mensual. */
+export async function fetchCierreKpiGerenciaDetalle(canal, mes) {
+  const { data } = await client.get(`/dashboard/gerencia/cierres/${canal}/${mes}/`);
+  return data;
+}
+
+/** Descarga CSV de resumen o detalle del cierre oficial. */
+export async function descargarCierreKpiCsv(canal, mes, tipo = "resumen") {
+  const response = await client.get(`/dashboard/gerencia/cierres/${canal}/${mes}/csv/`, {
+    params: { tipo },
+    responseType: "blob",
+  });
+  const blob = new Blob([response.data], { type: "text/csv;charset=utf-8" });
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `CIERRE_KPI_${canal}_${mes}_${tipo}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}

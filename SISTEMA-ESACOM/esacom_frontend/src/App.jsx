@@ -1,51 +1,32 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
-
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import RutaProtegida from "./components/RutaProtegida";
-
-import Login, { rutaPorCargo } from "./pages/Login";
-import DashboardBase from "./pages/DashboardBase";
-import SinAcceso from "./pages/SinAcceso";
-
-import PortalEjecutivo from "./pages/PortalEjecutivo";
-import PortalSupervisor from "./pages/PortalSupervisor";
+import { rutaPorCargo } from "./pages/Login";
+import Login from "./pages/Login";
 import DashboardGerencia from "./pages/DashboardGerencia";
-import DashboardSoporte from "./pages/DashboardSoporte";
-
-import Historico from "./pages/Historico";
-import AuditoriaKPI from "./pages/AuditoriaKPI";
+import CierresKPI from "./pages/CierresKPI";
 import SeguimientoEjecutivos from "./pages/SeguimientoEjecutivos";
 import SeguimientoBoletas from "./pages/SeguimientoBoletas";
+import Apelaciones from "./pages/Apelaciones";
+import BaseDatos from "./pages/BaseDatos";
+import Historico from "./pages/Historico";
+import CargarDatos from "./pages/CargarDatos";
+import AuditoriaKPI from "./pages/AuditoriaKPI";
 import Analisis from "./pages/Analisis";
+import PortalSupervisor from "./pages/PortalSupervisor";
+import PortalEjecutivo from "./pages/PortalEjecutivo";
+import DashboardSoporte from "./pages/DashboardSoporte";
+import Cobranza from "./pages/Cobranza";
+import Permisos from "./pages/Permisos";
+import PortalOperaciones from "./pages/PortalOperaciones";
+import PortalContabilidad from "./pages/PortalContabilidad";
+import EstadoSistema from "./pages/EstadoSistema";
+import SinAcceso from "./pages/SinAcceso";
 
-function Inicio() {
+function RaizSegunSesion() {
   const { user, cargando } = useAuth();
-
-  if (cargando) {
-    return null;
-  }
-
-  return (
-    <Navigate
-      to={user ? rutaPorCargo(user.cargo) : "/login"}
-      replace
-    />
-  );
-}
-
-function DashboardProtegido({
-  cargosPermitidos,
-  permisoRequerido,
-  children,
-}) {
-  return (
-    <RutaProtegida
-      cargosPermitidos={cargosPermitidos}
-      permisoRequerido={permisoRequerido}
-    >
-      {children || <DashboardBase />}
-    </RutaProtegida>
-  );
+  if (cargando) return null;
+  return <Navigate to={user ? rutaPorCargo(user.cargo) : "/login"} replace />;
 }
 
 export default function App() {
@@ -53,130 +34,135 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
-          <Route path="/" element={<Inicio />} />
-
+          <Route path="/" element={<RaizSegunSesion />} />
           <Route path="/login" element={<Login />} />
           <Route path="/sin-acceso" element={<SinAcceso />} />
 
           <Route
             path="/dashboard"
             element={
-              <DashboardProtegido
-                cargosPermitidos={["GERENCIA"]}
-                permisoRequerido="dashboard_gerencia"
-              >
+              <RutaProtegida cargosPermitidos={["GERENCIA"]} permisoRequerido="dashboard_gerencia">
                 <DashboardGerencia />
-              </DashboardProtegido>
+              </RutaProtegida>
             }
+          />
+          <Route
+            path="/cierres-kpi"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA"]} permisoRequerido="dashboard_gerencia">
+                <CierresKPI />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/ejecutivos"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA"]} permisoRequerido="dashboard_gerencia">
+                <SeguimientoEjecutivos />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/accionables"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "OPERACIONES", "SUPERVISOR", "EJECUTIVO"]} permisoRequerido="accionables">
+                <SeguimientoBoletas />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/cobranza"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "CONTABILIDAD", "OPERACIONES"]} permisoRequerido="cobranza">
+                <Cobranza />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/apelaciones"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "OPERACIONES", "CONTABILIDAD"]} permisoRequerido="apelaciones">
+                <Apelaciones />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/cargar-datos"
+            element={
+              <RutaProtegida cargosPermitidos={["SOPORTE"]} permisoRequerido="cargar_datos">
+                <CargarDatos />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/analisis"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "OPERACIONES"]} permisoRequerido="analisis">
+                <Analisis />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/auditoria-kpi"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "OPERACIONES", "CONTABILIDAD"]} permisoRequerido="auditoria_kpi">
+                <AuditoriaKPI />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/base-datos"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "OPERACIONES"]} permisoRequerido="base_datos">
+                <BaseDatos />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/historico"
+            element={
+              <RutaProtegida cargosPermitidos={["GERENCIA", "OPERACIONES", "CONTABILIDAD"]} permisoRequerido="historico">
+                <Historico />
+              </RutaProtegida>
+            }
+          />
+          <Route
+            path="/operaciones"
+            element={<RutaProtegida cargosPermitidos={["OPERACIONES"]}><PortalOperaciones /></RutaProtegida>}
+          />
+          <Route
+            path="/contabilidad"
+            element={<RutaProtegida cargosPermitidos={["CONTABILIDAD"]}><PortalContabilidad /></RutaProtegida>}
           />
 
           <Route
             path="/supervisor"
             element={
-              <DashboardProtegido
-                cargosPermitidos={["SUPERVISOR"]}
-                permisoRequerido="mi_equipo"
-              >
+              <RutaProtegida cargosPermitidos={["SUPERVISOR", "GERENCIA"]} permisoRequerido="mi_equipo">
                 <PortalSupervisor />
-              </DashboardProtegido>
+              </RutaProtegida>
             }
           />
-
           <Route
             path="/mi-portal"
             element={
-              <DashboardProtegido
-                cargosPermitidos={["EJECUTIVO"]}
-                permisoRequerido="mi_portal"
-              >
+              <RutaProtegida cargosPermitidos={["EJECUTIVO"]} permisoRequerido="mi_portal">
                 <PortalEjecutivo />
-              </DashboardProtegido>
-            }
-          />
-
-          <Route
-            path="/historico"
-            element={
-              <DashboardProtegido
-                cargosPermitidos={["GERENCIA", "SUPERVISOR"]}
-              >
-                <Historico />
-              </DashboardProtegido>
-            }
-          />
-
-          <Route
-            path="/ejecutivos"
-            element={
-              <DashboardProtegido
-                cargosPermitidos={["GERENCIA", "SUPERVISOR"]}
-              >
-                <SeguimientoEjecutivos />
-              </DashboardProtegido>
-            }
-          />
-
-          <Route
-            path="/accionables"
-            element={
-              <DashboardProtegido
-                cargosPermitidos={["GERENCIA", "SUPERVISOR", "EJECUTIVO"]}
-                permisoRequerido="accionables"
-              >
-                <SeguimientoBoletas />
-              </DashboardProtegido>
-            }
-          />
-
-          <Route
-            path="/analisis"
-            element={
-              <DashboardProtegido
-                cargosPermitidos={["GERENCIA"]}
-                permisoRequerido="analisis"
-              >
-                <Analisis />
-              </DashboardProtegido>
-            }
-          />
-
-          <Route
-            path="/auditoria-kpi"
-            element={
-              <DashboardProtegido
-                cargosPermitidos={["GERENCIA"]}
-                permisoRequerido="auditoria_kpi"
-              >
-                <AuditoriaKPI />
-              </DashboardProtegido>
+              </RutaProtegida>
             }
           />
 
           <Route
             path="/soporte"
             element={
-              <DashboardProtegido
-                cargosPermitidos={["SOPORTE"]}
-                permisoRequerido="usuarios"
-              >
+              <RutaProtegida cargosPermitidos={["SOPORTE"]} permisoRequerido="usuarios">
                 <DashboardSoporte />
-              </DashboardProtegido>
+              </RutaProtegida>
             }
           />
 
-          <Route
-            path="/operaciones"
-            element={
-              <DashboardProtegido cargosPermitidos={["OPERACIONES"]} />
-            }
-          />
-
-          <Route
-            path="/contabilidad"
-            element={
-              <DashboardProtegido cargosPermitidos={["CONTABILIDAD"]} />
-            }
-          />
+          <Route path="/permisos" element={<RutaProtegida cargosPermitidos={["SOPORTE","GERENCIA"]} permisoRequerido="permisos"><Permisos /></RutaProtegida>} />
+          <Route path="/estado-sistema" element={<RutaProtegida cargosPermitidos={["SOPORTE","GERENCIA"]} permisoRequerido="estado_sistema"><EstadoSistema /></RutaProtegida>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

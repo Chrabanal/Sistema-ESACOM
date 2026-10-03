@@ -1,14 +1,14 @@
-﻿"""IntegraciÃ³n ESACOM â†” Google Sheets.
+"""Integración ESACOM ↔ Google Sheets.
 
-La Google Sheet ESACOM es la fuente operativa maestra. Este mÃ³dulo permite:
+La Google Sheet ESACOM es la fuente operativa maestra. Este módulo permite:
 
 * descargar una copia XLSX para reutilizar el importador oficial;
-* leer rangos concretos para diagnÃ³stico;
-* consultar la metadata nativa de todas las pestaÃ±as, incluidas las ocultas.
+* leer rangos concretos para diagnóstico;
+* consultar la metadata nativa de todas las pestañas, incluidas las ocultas.
 
 Importante: las hojas de Claro presentes en la matriz NO se importan desde
-esta sincronizaciÃ³n. Claro solo complementa el CRM mediante los archivos KPI
-cargados por separado (lunes/miÃ©rcoles).
+esta sincronización. Claro solo complementa el CRM mediante los archivos KPI
+cargados por separado (lunes/miércoles).
 """
 from __future__ import annotations
 
@@ -19,7 +19,9 @@ import tempfile
 from pathlib import Path
 
 from django.conf import settings
+from django.db import transaction
 
+from integraciones.models import CargaExcel
 
 
 XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -28,7 +30,7 @@ XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 def _spreadsheet_id() -> str:
     spreadsheet_id = str(settings.GOOGLE_SHEETS_SPREADSHEET_ID or "").strip()
     if not spreadsheet_id:
-        raise RuntimeError("GOOGLE_SHEETS_SPREADSHEET_ID no estÃ¡ configurado en .env")
+        raise RuntimeError("GOOGLE_SHEETS_SPREADSHEET_ID no está configurado en .env")
     return spreadsheet_id
 
 
@@ -36,7 +38,7 @@ def _credential_path() -> Path:
     raw = str(settings.GOOGLE_SERVICE_ACCOUNT_FILE or "").strip()
     if not raw:
         raise RuntimeError(
-            "GOOGLE_SERVICE_ACCOUNT_FILE no estÃ¡ configurado. "
+            "GOOGLE_SERVICE_ACCOUNT_FILE no está configurado. "
             "Guarda el JSON de la cuenta de servicio y define su ruta en .env."
         )
     path = Path(raw)
@@ -81,17 +83,17 @@ def obtener_metadata_spreadsheet() -> dict:
 
 
 def _hojas_desde_xlsx(path: str | os.PathLike) -> list[dict]:
-    """Lee metadata de pestaÃ±as desde una exportaciÃ³n XLSX de Drive.
+    """Lee metadata de pestañas desde una exportación XLSX de Drive.
 
-    Esta ruta es el fallback oficial cuando la API de Google Sheets no estÃ¡
-    habilitada. La exportaciÃ³n XLSX conserva las pestaÃ±as ocultas, por lo que
+    Esta ruta es el fallback oficial cuando la API de Google Sheets no está
+    habilitada. La exportación XLSX conserva las pestañas ocultas, por lo que
     no necesitamos exigir una segunda API para auditar la matriz ESACOM.
     """
     from openpyxl import load_workbook
 
-    # Para metadata preferimos modo normal. Algunas pestaÃ±as auxiliares/pivot
-    # exportadas por Google (p. ej. "TD Dot") pueden carecer de una dimensiÃ³n
-    # vÃ¡lida y openpyxl read_only falla con UnboundLocalError al intentar
+    # Para metadata preferimos modo normal. Algunas pestañas auxiliares/pivot
+    # exportadas por Google (p. ej. "TD Dot") pueden carecer de una dimensión
+    # válida y openpyxl read_only falla con UnboundLocalError al intentar
     # calcularla. En modo normal max_row/max_column es robusto para este XLSX
     # (~pocos MB) y no modifica el archivo.
     wb = load_workbook(path, read_only=False, data_only=True)
@@ -102,8 +104,8 @@ def _hojas_desde_xlsx(path: str | os.PathLike) -> list[dict]:
                 row_count = int(ws.max_row or 0)
                 column_count = int(ws.max_column or 0)
             except Exception:
-                # La existencia/visibilidad de la hoja es mÃ¡s importante que
-                # una dimensiÃ³n defectuosa; mantenemos la pestaÃ±a auditable.
+                # La existencia/visibilidad de la hoja es más importante que
+                # una dimensión defectuosa; mantenemos la pestaña auditable.
                 row_count = 0
                 column_count = 0
             hojas.append({
@@ -123,9 +125,9 @@ def _hojas_desde_xlsx(path: str | os.PathLike) -> list[dict]:
 def obtener_hojas_spreadsheet() -> list[dict]:
     """Devuelve metadata de TODAS las hojas, incluso ocultas.
 
-    Intenta primero la API nativa de Sheets. Si esa API estÃ¡ deshabilitada
-    pero la cuenta de servicio sÃ­ puede exportar el archivo mediante Drive
-    (el caso real de ESACOM), usa automÃ¡ticamente la copia XLSX.
+    Intenta primero la API nativa de Sheets. Si esa API está deshabilitada
+    pero la cuenta de servicio sí puede exportar el archivo mediante Drive
+    (el caso real de ESACOM), usa automáticamente la copia XLSX.
     """
     try:
         resultado = _sheets_service().spreadsheets().get(
@@ -175,7 +177,7 @@ def obtener_hoja_por_titulo(titulo: str) -> dict | None:
 
 def _separar_rango_a1(rango: str) -> tuple[str, str]:
     if "!" not in rango:
-        raise ValueError(f"Rango A1 sin tÃ­tulo de hoja: {rango}")
+        raise ValueError(f"Rango A1 sin título de hoja: {rango}")
     titulo, celdas = rango.split("!", 1)
     titulo = titulo.strip()
     if titulo.startswith("'") and titulo.endswith("'"):
@@ -184,7 +186,7 @@ def _separar_rango_a1(rango: str) -> tuple[str, str]:
 
 
 def _leer_valores_desde_xlsx(path: str | os.PathLike, rango: str) -> list[list]:
-    """Lee un rango A1 desde la exportaciÃ³n XLSX usando valores calculados."""
+    """Lee un rango A1 desde la exportación XLSX usando valores calculados."""
     from openpyxl import load_workbook
     from openpyxl.utils.cell import column_index_from_string, range_boundaries
 
@@ -198,7 +200,7 @@ def _leer_valores_desde_xlsx(path: str | os.PathLike, rango: str) -> list[list]:
             ws.calculate_dimension(force=True)
 
         # Soporta rangos por columnas completas (A:BD) y rangos normales
-        # (A1:BH6), que son los usados por los comandos de diagnÃ³stico.
+        # (A1:BH6), que son los usados por los comandos de diagnóstico.
         m = re.fullmatch(r"([A-Za-z]+):([A-Za-z]+)", celdas)
         if m:
             min_col = column_index_from_string(m.group(1))
@@ -226,7 +228,7 @@ def _leer_valores_desde_xlsx(path: str | os.PathLike, rango: str) -> list[list]:
 
 
 def leer_valores(rango: str) -> list[list]:
-    """Lectura de diagnÃ³stico con fallback automÃ¡tico a Drive/XLSX."""
+    """Lectura de diagnóstico con fallback automático a Drive/XLSX."""
     try:
         resultado = _sheets_service().spreadsheets().values().get(
             spreadsheetId=_spreadsheet_id(),
@@ -250,7 +252,7 @@ def leer_valores(rango: str) -> list[list]:
 
 
 def leer_valores_multiples(rangos: list[str]) -> dict[str, list[list]]:
-    """Lee varios rangos intentando una sola exportaciÃ³n XLSX si Sheets falla."""
+    """Lee varios rangos intentando una sola exportación XLSX si Sheets falla."""
     try:
         return {rango: leer_valores_sheets(rango) for rango in rangos}
     except Exception:
@@ -268,7 +270,7 @@ def leer_valores_multiples(rangos: list[str]) -> dict[str, list[list]]:
 
 
 def leer_valores_sheets(rango: str) -> list[list]:
-    """Lectura estricta por Sheets API; Ãºtil para agrupar fallbacks."""
+    """Lectura estricta por Sheets API; útil para agrupar fallbacks."""
     resultado = _sheets_service().spreadsheets().values().get(
         spreadsheetId=_spreadsheet_id(),
         range=rango,
@@ -279,7 +281,7 @@ def leer_valores_sheets(rango: str) -> list[list]:
 
 
 def escapar_titulo_hoja(titulo: str) -> str:
-    """Escapa un nombre de pestaÃ±a para usarlo en notaciÃ³n A1."""
+    """Escapa un nombre de pestaña para usarlo en notación A1."""
     return "'" + str(titulo).replace("'", "''") + "'"
 
 
@@ -300,3 +302,167 @@ def descargar_spreadsheet_xlsx(destino: str | os.PathLike) -> dict:
     return metadata
 
 
+def sincronizar_base_matriz(*, creado_por=None) -> dict:
+    """Sincroniza la Google Sheet ESACOM hacia la base Django.
+
+    Se importan exclusivamente fuentes ESACOM:
+      - Dotación
+      - Honorarios
+      - Comunas
+      - Apoyo/promociones
+      - Base de Ventas + históricos BV/BDVentas
+      - Ventas Móvil + históricos Móvil/BV Móvil
+
+    NO se importan Base Claro ni Móvil Claro. Los KPI de Claro se cargan por
+    el flujo REPORTE_KPI y se cruzan contra las ventas ESACOM por N° pedido.
+    """
+    from integraciones.management.commands.importar_excel import Command as ImportarExcelCommand
+
+    _spreadsheet_id()  # valida configuración antes de crear temporales
+
+    tmp = tempfile.NamedTemporaryFile(prefix="esacom_sheets_", suffix=".xlsx", delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    try:
+        metadata = descargar_spreadsheet_xlsx(tmp_path)
+
+        # Auditoría atómica: calculamos la producción DIRECTAMENTE desde el
+        # mismo XLSX exacto que se importará a continuación. Esto elimina los
+        # falsos DIF cuando la matriz cambia entre dos descargas consecutivas.
+        from integraciones.services.produccion_fuente import calcular_produccion_desde_xlsx, campos
+        fuente_directa = calcular_produccion_desde_xlsx(tmp_path)
+
+        with transaction.atomic():
+            command = ImportarExcelCommand()
+            # Invocación directa para poder recuperar command.resumen.
+            command.handle(
+                archivo=tmp_path,
+                solo="dotacion,honorarios,comunas,apoyo,ventas,movil",
+                dry_run=False,
+                usuario_rut=getattr(creado_por, "rut", "") if creado_por else "",
+            )
+            resumen = getattr(command, "resumen", {}) or {}
+    
+            # Huella del archivo exacto que acabamos de importar.
+            sha256 = hashlib.sha256()
+            with open(tmp_path, "rb") as fh:
+                for bloque in iter(lambda: fh.read(1024 * 1024), b""):
+                    sha256.update(bloque)
+    
+            # Snapshot posterior al import del MISMO XLSX. No sustituye la
+            # auditoría directa de fuente, pero deja historia para explicar cómo
+            # evoluciona la producción entre sincronizaciones.
+            from ventas.produccion import resumen_produccion_actual
+            produccion = resumen_produccion_actual()
+            fuente_global = fuente_directa["global"]
+            fuente_resumen = {
+                "fija": {
+                    "completadas": fuente_global["fija"]["completadas"],
+                    "pendiente_instalacion": fuente_global["fija"]["pendiente_instalacion"],
+                    "total_control": fuente_global["fija"]["total_control"],
+                },
+                "movil": {
+                    "principal": fuente_global["movil"]["principal"],
+                    "adicional": fuente_global["movil"]["adicional"],
+                    "ppm": fuente_global["movil"]["ppm"],
+                    "total": fuente_global["movil"]["total"],
+                    "pendiente_activacion": fuente_global["movil"]["pendientes"],
+                },
+                "total_produccion": fuente_global["total_produccion"],
+                "trazabilidad": fuente_directa["trazabilidad"],
+            }
+            crm_resumen = {
+                "fija": {
+                    "completadas": produccion["fija"]["completadas"],
+                    "pendiente_instalacion": produccion["fija"]["pendiente_instalacion"],
+                    "total_control": produccion["fija"]["total_control"],
+                    "ventas_vigentes": produccion["fija"]["total_base_vigente"],
+                    "rgu_total_vigente": produccion["fija"]["rgu_total_base_vigente"],
+                },
+                "movil": {
+                    "principal": produccion["movil"]["principal"],
+                    "adicional": produccion["movil"]["adicional"],
+                    "ppm": produccion["movil"]["ppm"],
+                    "total": produccion["movil"]["total"],
+                    "pendiente_activacion": produccion["movil"]["pendiente_activacion"],
+                    "lineas_vigentes": produccion["movil"]["total_base_vigente"],
+                },
+                "total_produccion": produccion["total_produccion"],
+            }
+            crm_campos = (
+                int(produccion["fija"]["completadas"]),
+                int(produccion["fija"]["pendiente_instalacion"]),
+                int(produccion["movil"]["principal"]),
+                int(produccion["movil"]["adicional"]),
+                int(produccion["movil"]["ppm"]),
+            )
+            fuente_campos = campos(fuente_global)
+            alineado = fuente_campos == crm_campos
+            diferencias = {
+                nombre: {"fuente": fuente, "crm": crm, "delta": crm - fuente}
+                for nombre, fuente, crm in zip(
+                    ("fija_completadas", "fija_pendiente_instalacion", "movil_principal", "movil_adicional", "movil_ppm"),
+                    fuente_campos,
+                    crm_campos,
+                )
+                if fuente != crm
+            }
+
+            # La sincronización diaria no se bloquea por diferencias agregadas de auditoría.
+            # El XLSX descargado se importa dentro de la misma transacción y cualquier error
+            # real del importador sigue provocando rollback automático. La comparación queda
+            # registrada para revisión sin impedir que la base ESACOM avance con su corte vigente.
+            resumen_produccion = dict(crm_resumen)
+            resumen_produccion.update({
+                "fuente_directa": fuente_resumen,
+                "crm_post_import": crm_resumen,
+                "alineacion_fuente_crm": bool(alineado),
+                "auditoria_operacional": {
+                    "estado": "OK" if alineado else "ADVERTENCIA",
+                    "diferencias": diferencias,
+                },
+            })
+    
+            def contar(d):
+                total = 0
+                if isinstance(d, dict):
+                    for k, v in d.items():
+                        if isinstance(v, dict):
+                            total += contar(v)
+                        elif isinstance(v, int) and k in {
+                            "creados", "creadas", "actualizados", "actualizadas",
+                            "ventas_creadas", "ventas_actualizadas", "moviles_creadas",
+                            "moviles_actualizadas", "filas_importadas",
+                        }:
+                            total += max(v, 0)
+                return total
+    
+            from django.utils.dateparse import parse_datetime
+            modificada = parse_datetime(str(metadata.get("modifiedTime") or ""))
+            carga = CargaExcel.objects.create(
+                origen=CargaExcel.Origen.AUTOMATICO_SHEETS,
+                tipo_base=CargaExcel.TipoBase.BASE_MATRIZ,
+                archivo_nombre=f"Google Sheets ESACOM · {metadata.get('name', 'Base ESACOM')}",
+                filas_totales=contar(resumen),
+                fuente_modificada_en=modificada,
+                fuente_sha256=sha256.hexdigest(),
+                resumen_produccion=resumen_produccion,
+                creado_por=creado_por,
+            )
+            return {
+                "ok": True,
+                "carga_id": carga.id,
+                "spreadsheet": metadata.get("name"),
+                "modified_time": metadata.get("modifiedTime"),
+                "fuente_sha256": sha256.hexdigest(),
+                "resumen_produccion": resumen_produccion,
+                "fuente_directa": fuente_resumen,
+                "alineacion_fuente_crm": bool(alineado),
+                "auditoria_operacional": resumen_produccion.get("auditoria_operacional", {}),
+                "resumen": resumen,
+            }
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass

@@ -1,10 +1,9 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
-import { useAuth } from "../context/AuthContext";
-import { menuPorUsuario } from "../utils/navigation";
+import { ADMIN_URL } from "../api/client";
 import { fetchKpiPorEjecutivo } from "../api/dashboard";
 
-const NOMBRE_BOLETA = { B1: "1\u00AA Boleta", B2: "2\u00AA Boleta", B3: "3\u00AA Boleta" };
+const NOMBRE_BOLETA = { B1: "1ª Boleta", B2: "2ª Boleta", B3: "3ª Boleta" };
 
 const COLOR_CELDA = {
   verde: "bg-green-50 text-esacom-green",
@@ -16,11 +15,10 @@ const COLOR_CELDA = {
 function nombreCorte(mesAno, boleta) {
   const [anio, mes] = mesAno.split("-");
   const nombres = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
-  return `${nombres[parseInt(mes, 10) - 1]} ${anio} \u00B7 ${NOMBRE_BOLETA[boleta] || boleta}`;
+  return `${nombres[parseInt(mes, 10) - 1]} ${anio} · ${NOMBRE_BOLETA[boleta] || boleta}`;
 }
 
 export default function SeguimientoEjecutivos() {
-  const { user } = useAuth();
   const [ejecutivos, setEjecutivos] = useState(null);
   const [busqueda, setBusqueda] = useState("");
   const [soloRiesgo, setSoloRiesgo] = useState(false);
@@ -57,7 +55,19 @@ export default function SeguimientoEjecutivos() {
   return (
     <Layout
       titulo="Seguimiento a ejecutivos"
-      items={menuPorUsuario(user)}
+      items={[
+        { label: "Dashboard", to: "/dashboard" },
+        { label: "Ejecutivos", to: "/ejecutivos" },
+        { label: "Cierres KPI", to: "/cierres-kpi" },
+        { label: "Accionables", to: "/accionables" },
+        { label: "Apelaciones", to: "/apelaciones" },
+        { label: "Base de Datos", to: "/base-datos" },
+        { label: "Histórico", to: "/historico" },
+        { label: "Análisis", to: "/analisis" },
+        { label: "Cargar Datos", to: "/cargar-datos" },
+        { label: "Auditoría KPI", to: "/auditoria-kpi" },
+        { label: "Admin", href: ADMIN_URL },
+      ]}
     >
       {error && <p className="text-sm text-esacom-red bg-esacom-red-light rounded-lg px-4 py-3">{error}</p>}
 
@@ -65,7 +75,7 @@ export default function SeguimientoEjecutivos() {
 
       {!error && ejecutivos?.length === 0 && (
         <div className="rounded-xl border border-dashed border-gray-300 bg-white p-10 text-center text-sm text-gray-400">
-          No hay ejecutivos con cortes registrados todav\u00EDa.
+          No hay ejecutivos con cortes registrados todavía.
         </div>
       )}
 
@@ -119,17 +129,17 @@ export default function SeguimientoEjecutivos() {
                   <tr key={e.ejecutivo.id} className="border-b border-gray-100 last:border-0">
                     <td className="px-4 py-3 sticky left-0 bg-white z-10">
                       <p className="font-medium text-gray-900">{e.ejecutivo.nombre}</p>
-                      <p className="text-xs text-gray-400">{e.ejecutivo.equipo || "Sin equipo"} \u00B7 {e.ejecutivo.rut}</p>
+                      <p className="text-xs text-gray-400">{e.ejecutivo.equipo || "Sin equipo"} · {e.ejecutivo.rut}</p>
                     </td>
                     {columnas.map((col) => {
                       const corte = e.cortes.find((c) => c.mes_ano === col.mes_ano && c.boleta === col.boleta);
-                      if (!corte) return <td key={`${col.mes_ano}-${col.boleta}`} className="px-4 py-3 text-center text-gray-300">{"\u2014"}</td>;
+                      if (!corte) return <td key={`${col.mes_ano}-${col.boleta}`} className="px-4 py-3 text-center text-gray-300">—</td>;
                       return (
                         <td key={`${col.mes_ano}-${col.boleta}`} className="px-2 py-2">
                           <div className={`rounded-lg px-3 py-1.5 text-center ${COLOR_CELDA[corte.semaforo]}`}>
                             <p className="font-semibold">{corte.pct_cumplimiento.toFixed(2)}%</p>
                             <p className="text-[10px] opacity-75">RGU {corte.pagadas}/{corte.total}</p>
-                            {(corte.fuera_medicion || 0) > 0 && <p className="text-[9px] opacity-60">{corte.fuera_medicion} fuera medici\u00F3n</p>}
+                            {(corte.fuera_medicion || 0) > 0 && <p className="text-[9px] opacity-60">{corte.fuera_medicion} fuera medición</p>}
                           </div>
                         </td>
                       );
@@ -147,4 +157,3 @@ export default function SeguimientoEjecutivos() {
     </Layout>
   );
 }
-
