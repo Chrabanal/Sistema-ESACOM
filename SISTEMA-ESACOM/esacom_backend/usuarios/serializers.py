@@ -50,10 +50,7 @@ class UsuarioSoporteSerializer(serializers.ModelSerializer):
             "cargo_fuente_esacom", "supervisor_fuente", "estado_contrato_fuente", "ultima_sync_dotacion",
             "creado_en", "actualizado_en", "ultimo_acceso",
         ]
-        read_only_fields = [
-            "id", "cargo_fuente_esacom", "supervisor_fuente", "estado_contrato_fuente",
-            "ultima_sync_dotacion", "creado_en", "actualizado_en", "ultimo_acceso",
-        ]
+        read_only_fields = ["id", "cargo_fuente_esacom", "supervisor_fuente", "estado_contrato_fuente", "ultima_sync_dotacion", "creado_en", "actualizado_en", "ultimo_acceso"]
 
     def validate_password(self, value):
         try:
@@ -79,34 +76,28 @@ class UsuarioSoporteSerializer(serializers.ModelSerializer):
         if cargo != Ejecutivo.Cargo.EJECUTIVO:
             attrs["supervisor"] = None
         elif supervisor and supervisor.cargo != Ejecutivo.Cargo.SUPERVISOR:
-            raise serializers.ValidationError({
-                "supervisor_id": "El supervisor seleccionado no tiene rol SUPERVISOR."
-            })
+            raise serializers.ValidationError({"supervisor_id": "El supervisor seleccionado no tiene rol SUPERVISOR."})
 
         return attrs
 
     def create(self, validated_data):
         password = validated_data.pop("password", None)
         if not password:
-            raise serializers.ValidationError({
-                "password": "La contraseña temporal es obligatoria."
-            })
+            raise serializers.ValidationError({"password": "La contraseña temporal es obligatoria."})
         usuario = Ejecutivo(**validated_data)
         usuario.set_password(password)
         usuario.save()
         return usuario
 
     def update(self, instance, validated_data):
-        if "password" in validated_data:
-            raise serializers.ValidationError({
-                "password": "Usa la acción de restablecimiento para cambiar la contraseña."
-            })
-
+        password = validated_data.pop("password", None)
         cargo_anterior = instance.cargo
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if "cargo" in validated_data and instance.cargo != cargo_anterior:
             instance.permisos_personalizados = {}
+        if password:
+            instance.set_password(password)
         instance.save()
         return instance
 
@@ -133,10 +124,7 @@ class MeSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Ejecutivo
-        fields = [
-            "id", "rut", "nombre", "correo", "cargo", "equipo", "telefono",
-            "tipo_contrato", "tipo_kpi", "permisos",
-        ]
+        fields = ["id", "rut", "nombre", "correo", "cargo", "equipo", "telefono", "tipo_contrato", "tipo_kpi", "permisos"]
 
 
 class PermisosUsuarioSerializer(serializers.ModelSerializer):
@@ -145,10 +133,7 @@ class PermisosUsuarioSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Ejecutivo
-        fields = [
-            "id", "rut", "nombre", "cargo", "equipo", "is_active",
-            "permisos", "permisos_base", "permisos_personalizados",
-        ]
+        fields = ["id", "rut", "nombre", "cargo", "equipo", "is_active", "permisos", "permisos_base", "permisos_personalizados"]
 
     def get_permisos(self, obj):
         return obj.permisos_efectivos()

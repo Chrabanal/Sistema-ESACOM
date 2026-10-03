@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Marca ESACOM: rojo como color principal (NO los colores del logo),
+         consistente con src/index.css del frontend web. -->
+    <color name="colorPrimary">#DA291C</color>
+    <color name="colorPrimaryDark">#8E2510</color>
+    <color name="colorAccent">#DA291C</color>
+</resources>
