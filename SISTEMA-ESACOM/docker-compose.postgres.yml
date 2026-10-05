@@ -126,7 +126,7 @@ services:
       [
         "celery",
         "-A",
-        "esacom_backend",
+        "esacom_backend.celery:app",
         "worker",
         "--loglevel=INFO",
         "--concurrency=2"
@@ -174,7 +174,7 @@ services:
       [
         "celery",
         "-A",
-        "esacom_backend",
+        "esacom_backend.celery:app",
         "beat",
         "--loglevel=INFO",
         "--schedule=/tmp/celerybeat-schedule"
