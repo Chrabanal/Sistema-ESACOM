@@ -31,13 +31,22 @@ function puedeVerItem(user, item) {
 
 function Navegacion({ items, user }) {
   const visibles = items.filter((item) => puedeVerItem(user, item));
+  const principales = visibles.filter((item) => !item.secundario);
+  const secundarios = visibles.filter((item) => item.secundario);
+
+  const clasePrincipal = ({ isActive }) =>
+    `whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-esacom-lime ${
+      isActive
+        ? "bg-esacom-lime-light text-esacom-ink ring-1 ring-esacom-lime/30"
+        : "text-gray-500 hover:bg-gray-100 hover:text-esacom-ink"
+    }`;
 
   return (
     <nav
       aria-label="Navegación principal"
-      className="flex min-w-max items-center gap-1.5 lg:min-w-0 lg:flex-wrap"
+      className="flex flex-wrap items-center gap-1.5"
     >
-      {visibles.map((item) =>
+      {principales.map((item) =>
         item.href ? (
           <a
             key={`${item.label}-${item.href}`}
@@ -52,22 +61,59 @@ function Navegacion({ items, user }) {
           <NavLink
             key={`${item.label}-${item.to}`}
             to={item.to}
-            className={({ isActive }) =>
-              `whitespace-nowrap rounded-xl px-3 py-2 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-esacom-lime ${
-                isActive
-                  ? "bg-esacom-lime-light text-esacom-ink ring-1 ring-esacom-lime/30"
-                  : "text-gray-500 hover:bg-gray-100 hover:text-esacom-ink"
-              }`
-            }
+            className={clasePrincipal}
           >
             {item.label}
           </NavLink>
         ) : null
       )}
+
+      {secundarios.length > 0 && (
+        <details className="group relative">
+          <summary className="flex cursor-pointer list-none items-center gap-1 whitespace-nowrap rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-600 transition hover:bg-gray-50 hover:text-esacom-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-esacom-lime [&::-webkit-details-marker]:hidden">
+            Más
+            <span
+              aria-hidden="true"
+              className="text-[10px] transition-transform group-open:rotate-180"
+            >
+              ▼
+            </span>
+          </summary>
+
+          <div className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-gray-200 bg-white p-2 shadow-xl">
+            {secundarios.map((item) =>
+              item.href ? (
+                <a
+                  key={`${item.label}-${item.href}`}
+                  href={item.href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block rounded-xl px-3 py-2.5 text-xs font-semibold text-gray-600 transition hover:bg-gray-100 hover:text-esacom-ink"
+                >
+                  {item.label} ↗
+                </a>
+              ) : item.to ? (
+                <NavLink
+                  key={`${item.label}-${item.to}`}
+                  to={item.to}
+                  className={({ isActive }) =>
+                    `block rounded-xl px-3 py-2.5 text-xs font-semibold transition ${
+                      isActive
+                        ? "bg-esacom-lime-light text-esacom-ink"
+                        : "text-gray-600 hover:bg-gray-100 hover:text-esacom-ink"
+                    }`
+                  }
+                >
+                  {item.label}
+                </NavLink>
+              ) : null
+            )}
+          </div>
+        </details>
+      )}
     </nav>
   );
 }
-
 export default function Layout({ titulo, children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
@@ -117,7 +163,7 @@ export default function Layout({ titulo, children }) {
 
         {visibles.length > 0 && (
           <div className="border-t border-gray-100 bg-white">
-            <div className="mx-auto max-w-[1500px] overflow-x-auto px-2 py-2 scrollbar-none sm:px-5 lg:overflow-visible">
+            <div className="mx-auto max-w-[1500px] px-2 py-2 sm:px-5">
               <Navegacion items={items} user={user} />
             </div>
           </div>

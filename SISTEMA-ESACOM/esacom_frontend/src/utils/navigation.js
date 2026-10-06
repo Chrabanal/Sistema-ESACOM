@@ -19,18 +19,26 @@ export function menuPorUsuario(user) {
       add("dashboard_gerencia", "Dashboard", "/dashboard");
       add("dashboard_gerencia", "Ejecutivos", "/ejecutivos");
       add("dashboard_gerencia", "Cierres KPI", "/cierres-kpi");
-      add("accionables", "Accionables", "/accionables");
-      add("cobranza", "Cobranza", "/cobranza");
-      add("apelaciones", "Apelaciones", "/apelaciones");
       add("historico", "Histórico", "/historico");
       add("analisis", "Análisis", "/analisis");
-      add("auditoria_kpi", "Auditoría KPI", "/auditoria-kpi");
-      add("base_datos", "Base de Datos", "/base-datos");
-      add("estado_sistema", "Estado sistema", "/estado-sistema");
-      add("permisos", "Permisos", "/permisos");
-      if (p.dashboard_gerencia) items.push({ label: "Admin", href: ADMIN_URL, permiso: "dashboard_gerencia" });
-      break;
 
+      add("accionables", "Accionables", "/accionables", { secundario: true });
+      add("cobranza", "Cobranza", "/cobranza", { secundario: true });
+      add("apelaciones", "Apelaciones", "/apelaciones", { secundario: true });
+      add("auditoria_kpi", "Auditoría KPI", "/auditoria-kpi", { secundario: true });
+      add("base_datos", "Base de Datos", "/base-datos", { secundario: true });
+      add("estado_sistema", "Estado sistema", "/estado-sistema", { secundario: true });
+      add("permisos", "Permisos", "/permisos", { secundario: true });
+
+      if (p.dashboard_gerencia) {
+        items.push({
+          label: "Admin",
+          href: ADMIN_URL,
+          permiso: "dashboard_gerencia",
+          secundario: true,
+        });
+      }
+      break;
     case "OPERACIONES":
       addLibre("Inicio", "/operaciones");
       add("accionables", "Accionables", "/accionables");
