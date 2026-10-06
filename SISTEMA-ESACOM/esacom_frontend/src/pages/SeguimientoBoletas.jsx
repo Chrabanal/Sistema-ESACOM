@@ -87,13 +87,40 @@ export default function SeguimientoBoletas() {
   }, [datos]);
 
   const datosFiltrados = useMemo(() => {
-    if (!datos || !ejecutivoFiltro) return datos;
+    if (!datos) return datos;
+
+    const textoBusqueda = busqueda.trim().toLowerCase();
+
+    if (!ejecutivoFiltro && !textoBusqueda) return datos;
+
     const salida = {};
+
     for (const [clave, bucket] of Object.entries(datos)) {
-      salida[clave] = reconstruirBucket((bucket?.items || []).filter((item) => item.ejecutivo === ejecutivoFiltro));
+      const items = (bucket?.items || []).filter((item) => {
+        const coincideEjecutivo =
+          !ejecutivoFiltro || item.ejecutivo === ejecutivoFiltro;
+
+        const textoItem = [
+          item.nombre_cliente,
+          item.rut_cliente,
+          item.pedido,
+          item.ejecutivo,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        const coincideBusqueda =
+          !textoBusqueda || textoItem.includes(textoBusqueda);
+
+        return coincideEjecutivo && coincideBusqueda;
+      });
+
+      salida[clave] = reconstruirBucket(items);
     }
+
     return salida;
-  }, [datos, ejecutivoFiltro]);
+  }, [datos, ejecutivoFiltro, busqueda]);
 
   const clientesUrgentes = useMemo(() => {
     if (!datosFiltrados) return 0;
@@ -112,6 +139,13 @@ export default function SeguimientoBoletas() {
           <p className="text-xs text-gray-400 mt-1">Solo se muestran boletas pendientes, medibles y asociadas al vendedor ESACOM.</p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+          <input
+            type="search"
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar cliente, RUT o pedido"
+            className="min-h-11 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm sm:min-w-[240px]"
+          />
           {(["SUPERVISOR","GERENCIA","OPERACIONES"].includes(user?.cargo)) && ejecutivos.length > 0 && (
             <select value={ejecutivoFiltro} onChange={(e) => setEjecutivoFiltro(e.target.value)} className="min-h-11 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm">
               <option value="">Todos con KPI vigente</option>
