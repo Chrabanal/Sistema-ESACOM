@@ -49,6 +49,7 @@ export default function SeguimientoBoletas() {
   const [error, setError] = useState("");
   const [abierto, setAbierto] = useState("vencidos");
   const [ejecutivoFiltro, setEjecutivoFiltro] = useState("");
+  const [busqueda, setBusqueda] = useState("");
   const [actualizando, setActualizando] = useState(false);
   const [refrescadoEn, setRefrescadoEn] = useState(null);
 
