@@ -571,3 +571,115 @@ class DotacionAsignacionSeguraTests(TestCase):
             1,
         )
         self.assertEqual(resultado["cambios_supervisor"], 1)
+
+    def test_cambio_supervisor_genera_auditoria_con_antes_y_despues(self):
+        from integraciones.management.commands.importar_excel import Command
+        from usuarios.models import Ejecutivo, AuditoriaUsuario
+
+        charly = Ejecutivo.objects.create_user(
+            rut="17480807-4",
+            nombre="CHARLY FABIAN ESTAY LAZO",
+            cargo=Ejecutivo.Cargo.SUPERVISOR,
+            password="PruebaSegura2026!",
+        )
+
+        jorge = Ejecutivo.objects.create_user(
+            rut="16440386-6",
+            nombre="JORGE ANTONIO HERNANDEZ URETA",
+            cargo=Ejecutivo.Cargo.SUPERVISOR,
+            password="PruebaSegura2026!",
+        )
+
+        vendedor = Ejecutivo.objects.create_user(
+            rut="77777777-7",
+            nombre="VENDEDOR AUDITORIA",
+            cargo=Ejecutivo.Cargo.EJECUTIVO,
+            supervisor=charly,
+            password="PruebaSegura2026!",
+        )
+
+        wb = self._wb([
+            [
+                "17480807-4",
+                "CHARLY FABIAN ESTAY LAZO",
+                "Supervisor",
+                "",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+            [
+                "16440386-6",
+                "JORGE ANTONIO HERNANDEZ URETA",
+                "Supervisor",
+                "",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+            [
+                "77777777-7",
+                "VENDEDOR AUDITORIA",
+                "Ejecutivo de Ventas",
+                "Jorge Hernandez",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+        ])
+
+        Command()._importar_dotacion(wb)
+
+        auditoria = AuditoriaUsuario.objects.get(
+            usuario_objetivo=vendedor,
+            accion=AuditoriaUsuario.Accion.ASIGNACION_SUPERVISOR,
+        )
+
+        self.assertIsNone(auditoria.actor)
+        self.assertEqual(
+            auditoria.detalle["origen"],
+            "Dotación ESACOM",
+        )
+        self.assertEqual(
+            auditoria.detalle["antes"]["rut"],
+            charly.rut,
+        )
+        self.assertEqual(
+            auditoria.detalle["despues"]["rut"],
+            jorge.rut,
+        )
+        self.assertEqual(
+            auditoria.detalle["antes"]["nombre"],
+            charly.nombre,
+        )
+        self.assertEqual(
+            auditoria.detalle["despues"]["nombre"],
+            jorge.nombre,
+        )
