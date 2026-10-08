@@ -403,3 +403,76 @@ class DotacionAsignacionSeguraTests(TestCase):
             "44444444-4 VENDEDOR REACTIVADO",
             resultado["activos_no_en_archivo"],
         )
+
+    def test_mismo_rut_actualiza_registro_sin_crear_duplicado(self):
+        from integraciones.management.commands.importar_excel import Command
+        from usuarios.models import Ejecutivo
+
+        vendedor = Ejecutivo.objects.create_user(
+            rut="55555555-5",
+            nombre="NOMBRE ANTIGUO",
+            cargo=Ejecutivo.Cargo.EJECUTIVO,
+            password="PruebaSegura2026!",
+        )
+
+        wb = self._wb([
+            [
+                "55555555-5",
+                "NOMBRE ACTUALIZADO",
+                "Ejecutivo de Ventas",
+                "",
+                "EQUIPO NUEVO",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "MOVIL-999",
+                "FIJO-999",
+                "ANDES-999",
+                "999999999",
+                "CONTRATADO",
+            ],
+        ])
+
+        resultado = Command()._importar_dotacion(wb)
+
+        vendedor.refresh_from_db()
+
+        self.assertEqual(
+            Ejecutivo.objects.filter(rut="55555555-5").count(),
+            1,
+        )
+        self.assertEqual(
+            vendedor.nombre,
+            "NOMBRE ACTUALIZADO",
+        )
+        self.assertEqual(
+            vendedor.equipo,
+            "EQUIPO NUEVO",
+        )
+        self.assertEqual(
+            vendedor.codigo_movil,
+            "MOVIL-999",
+        )
+        self.assertEqual(
+            vendedor.codigo_fijo,
+            "FIJO-999",
+        )
+        self.assertEqual(
+            vendedor.codigo_andes,
+            "ANDES-999",
+        )
+        self.assertEqual(
+            vendedor.telefono,
+            "999999999",
+        )
+        self.assertEqual(
+            resultado["creados"],
+            0,
+        )
+        self.assertEqual(
+            resultado["actualizados"],
+            1,
+        )
