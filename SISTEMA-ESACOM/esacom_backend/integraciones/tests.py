@@ -295,3 +295,60 @@ class DotacionAsignacionSeguraTests(TestCase):
         self.assertEqual(vendedor.estado_contrato, Ejecutivo.EstadoContrato.INACTIVO)
         self.assertIsNone(vendedor.supervisor_id)
         self.assertIn("ALIAS INEXISTENTE", r["alias_supervisor_no_resueltos"])
+
+    def test_activo_ausente_de_dotacion_se_reporta_sin_desactivarse(self):
+        from integraciones.management.commands.importar_excel import Command
+        from usuarios.models import Ejecutivo
+
+        ausente = Ejecutivo.objects.create_user(
+            rut="22222222-2",
+            nombre="USUARIO AUSENTE",
+            cargo=Ejecutivo.Cargo.EJECUTIVO,
+            password="PruebaSegura2026!",
+        )
+
+        presente = Ejecutivo.objects.create_user(
+            rut="33333333-3",
+            nombre="USUARIO PRESENTE",
+            cargo=Ejecutivo.Cargo.EJECUTIVO,
+            password="PruebaSegura2026!",
+        )
+
+        wb = self._wb([
+            [
+                "33333333-3",
+                "USUARIO PRESENTE",
+                "Ejecutivo de Ventas",
+                "",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+        ])
+
+        resultado = Command()._importar_dotacion(wb)
+
+        ausente.refresh_from_db()
+        presente.refresh_from_db()
+
+        self.assertTrue(ausente.is_active)
+        self.assertTrue(presente.is_active)
+
+        self.assertIn(
+            "22222222-2 USUARIO AUSENTE",
+            resultado["activos_no_en_archivo"],
+        )
+
+        self.assertNotIn(
+            "33333333-3 USUARIO PRESENTE",
+            resultado["activos_no_en_archivo"],
+        )
