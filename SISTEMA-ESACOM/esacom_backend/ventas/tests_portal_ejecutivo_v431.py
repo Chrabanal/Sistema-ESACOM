@@ -61,6 +61,58 @@ class PortalEjecutivoHistoricoTests(TestCase):
         self.assertEqual([(x["mes_ano"], x["boleta"]) for x in historico], [("2026-04", "B3")])
 
 
+    def test_historico_se_desplaza_sin_perder_meses_anteriores(self):
+        from .views import _historico_kpi_usuario
+
+        datos = [
+            ("1-MAY-HIST", "2026-05", Corte.Boleta.B3),
+            ("1-ABR-HIST", "2026-04", Corte.Boleta.B3),
+        ]
+
+        for pedido, mes, boleta in datos:
+            venta = self._venta(pedido, mes)
+
+            Corte.objects.create(
+                venta=venta,
+                mes_ano=mes,
+                boleta=boleta,
+                meta_pct=Decimal("80"),
+                estado_pago=Corte.EstadoPago.PAGADO,
+                es_medible=True,
+                rgu_kpi=1,
+            )
+
+        historico_julio = _historico_kpi_usuario(
+            self.ejecutivo,
+            {
+                "B1": "2026-07",
+                "B2": "2026-06",
+                "B3": "2026-05",
+            },
+        )
+
+        self.assertEqual(
+            [(x["mes_ano"], x["boleta"]) for x in historico_julio],
+            [("2026-04", "B3")],
+        )
+
+        historico_agosto = _historico_kpi_usuario(
+            self.ejecutivo,
+            {
+                "B1": "2026-08",
+                "B2": "2026-07",
+                "B3": "2026-06",
+            },
+        )
+
+        self.assertEqual(
+            [(x["mes_ano"], x["boleta"]) for x in historico_agosto],
+            [
+                ("2026-05", "B3"),
+                ("2026-04", "B3"),
+            ],
+        )
+
 class PortalEjecutivoClientesActivosTests(TestCase):
     def setUp(self):
         self.factory = APIRequestFactory()

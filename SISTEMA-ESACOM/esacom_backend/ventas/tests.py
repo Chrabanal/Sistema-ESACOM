@@ -742,6 +742,72 @@ class AccionablesUniversoEsacomTests(KpiPorRguTests):
         self.assertEqual(qs.first().venta_id, instalada.id)
 
 
+    def test_accionables_no_mezcla_snapshot_kpi_anterior(self):
+        from django.utils import timezone
+        from .services import filtrar_cortes_kpi_operativos, resumen_accionables
+        from .views import _cortes_visibles
+
+        carga_anterior = CargaExcel.objects.create(
+            origen=CargaExcel.Origen.MANUAL,
+            tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
+            archivo_nombre="KPI_ANTERIOR.xlsx",
+        )
+
+        carga_actual = CargaExcel.objects.create(
+            origen=CargaExcel.Origen.MANUAL,
+            tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
+            archivo_nombre="KPI_ACTUAL.xlsx",
+        )
+
+        venta_anterior = self._venta("1-ACC-HIST", 50)
+        venta_anterior.estado_instalacion = Venta.EstadoInstalacion.INSTALADO
+        venta_anterior.save(update_fields=["estado_instalacion"])
+
+        venta_actual = self._venta("1-ACC-ACT", 2)
+        venta_actual.estado_instalacion = Venta.EstadoInstalacion.INSTALADO
+        venta_actual.save(update_fields=["estado_instalacion"])
+
+        vencimiento = timezone.localdate() - datetime.timedelta(days=1)
+
+        Corte.objects.create(
+            venta=venta_anterior,
+            carga_kpi=carga_anterior,
+            mes_ano="2026-07",
+            boleta=Corte.Boleta.B1,
+            estado_pago=Corte.EstadoPago.PENDIENTE,
+            es_medible=True,
+            fecha_vencimiento=vencimiento,
+            rgu_kpi=50,
+            meta_pct=Decimal("85"),
+        )
+
+        Corte.objects.create(
+            venta=venta_actual,
+            carga_kpi=carga_actual,
+            mes_ano="2026-07",
+            boleta=Corte.Boleta.B1,
+            estado_pago=Corte.EstadoPago.PENDIENTE,
+            es_medible=True,
+            fecha_vencimiento=vencimiento,
+            rgu_kpi=2,
+            meta_pct=Decimal("85"),
+        )
+
+        cortes = _cortes_visibles(
+            self.ejecutivo,
+            carga_kpi=carga_actual,
+        )
+
+        cortes = filtrar_cortes_kpi_operativos(cortes)
+
+        data = resumen_accionables(
+            cortes,
+            focos={"B1": "2026-07"},
+        )
+
+        self.assertEqual(data["vencidos"]["casos"], 1)
+        self.assertEqual(data["vencidos"]["rgu"], 2)
+
 class HonorariosCalidadYProduccionTests(TestCase):
     def setUp(self):
         self.supervisor = Ejecutivo.objects.create_user(
