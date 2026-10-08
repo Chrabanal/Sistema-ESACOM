@@ -352,3 +352,54 @@ class DotacionAsignacionSeguraTests(TestCase):
             "33333333-3 USUARIO PRESENTE",
             resultado["activos_no_en_archivo"],
         )
+
+    def test_usuario_inactivo_se_reactiva_si_dotacion_lo_informa_contratado(self):
+        from integraciones.management.commands.importar_excel import Command
+        from usuarios.models import Ejecutivo
+
+        vendedor = Ejecutivo.objects.create_user(
+            rut="44444444-4",
+            nombre="VENDEDOR REACTIVADO",
+            cargo=Ejecutivo.Cargo.EJECUTIVO,
+            password="PruebaSegura2026!",
+        )
+
+        vendedor.is_active = False
+        vendedor.estado_contrato = Ejecutivo.EstadoContrato.INACTIVO
+        vendedor.save(update_fields=["is_active", "estado_contrato"])
+
+        wb = self._wb([
+            [
+                "44444444-4",
+                "VENDEDOR REACTIVADO",
+                "Ejecutivo de Ventas",
+                "",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+        ])
+
+        resultado = Command()._importar_dotacion(wb)
+
+        vendedor.refresh_from_db()
+
+        self.assertTrue(vendedor.is_active)
+        self.assertEqual(
+            vendedor.estado_contrato,
+            Ejecutivo.EstadoContrato.ACTIVO,
+        )
+        self.assertEqual(resultado["actualizados"], 1)
+        self.assertNotIn(
+            "44444444-4 VENDEDOR REACTIVADO",
+            resultado["activos_no_en_archivo"],
+        )
