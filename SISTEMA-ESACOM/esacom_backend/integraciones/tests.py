@@ -476,3 +476,98 @@ class DotacionAsignacionSeguraTests(TestCase):
             resultado["actualizados"],
             1,
         )
+
+    def test_cambio_de_supervisor_actualiza_asignacion_existente(self):
+        from integraciones.management.commands.importar_excel import Command
+        from usuarios.models import Ejecutivo
+
+        charly = Ejecutivo.objects.create_user(
+            rut="17480807-4",
+            nombre="CHARLY FABIAN ESTAY LAZO",
+            cargo=Ejecutivo.Cargo.SUPERVISOR,
+            password="PruebaSegura2026!",
+        )
+
+        jorge = Ejecutivo.objects.create_user(
+            rut="16440386-6",
+            nombre="JORGE ANTONIO HERNANDEZ URETA",
+            cargo=Ejecutivo.Cargo.SUPERVISOR,
+            password="PruebaSegura2026!",
+        )
+
+        vendedor = Ejecutivo.objects.create_user(
+            rut="66666666-6",
+            nombre="VENDEDOR CAMBIO SUPERVISOR",
+            cargo=Ejecutivo.Cargo.EJECUTIVO,
+            supervisor=charly,
+            password="PruebaSegura2026!",
+        )
+
+        wb = self._wb([
+            [
+                "17480807-4",
+                "CHARLY FABIAN ESTAY LAZO",
+                "Supervisor",
+                "",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+            [
+                "16440386-6",
+                "JORGE ANTONIO HERNANDEZ URETA",
+                "Supervisor",
+                "",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+            [
+                "66666666-6",
+                "VENDEDOR CAMBIO SUPERVISOR",
+                "Ejecutivo de Ventas",
+                "Jorge Hernandez",
+                "Q",
+                "Activo",
+                "",
+                "",
+                "",
+                "Indefinido",
+                None,
+                "",
+                "",
+                "",
+                "",
+                "CONTRATADO",
+            ],
+        ])
+
+        resultado = Command()._importar_dotacion(wb)
+
+        vendedor.refresh_from_db()
+
+        self.assertEqual(vendedor.supervisor_id, jorge.id)
+        self.assertNotEqual(vendedor.supervisor_id, charly.id)
+        self.assertEqual(
+            Ejecutivo.objects.filter(rut="66666666-6").count(),
+            1,
+        )
+        self.assertEqual(resultado["cambios_supervisor"], 1)
