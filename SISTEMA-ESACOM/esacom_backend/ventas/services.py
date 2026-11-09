@@ -1,4 +1,4 @@
-"""
+﻿"""
 Cálculo de KPI para ESACOM.
 
 La regla se ajustó al archivo KPI real recibido de Claro: el indicador
@@ -434,33 +434,52 @@ def filtrar_cortes_kpi_operativos(cortes: QuerySet[Corte]) -> QuerySet[Corte]:
 
 def resumen_accionables(cortes: QuerySet[Corte], focos: dict[str, str] | None = None) -> dict:
     """
-    Accionables del vendedor/equipo: agrupa cortes PENDIENTES y medibles en
-    VENCIDOS, HOY, MAÑANA y PRÓXIMOS 3 DÍAS.
+    Gestion diaria de boletas pendientes para Ejecutivo/Supervisor.
 
-    Cuando se informan ``focos`` limita estrictamente los casos a los tres
-    focos oficiales del snapshot KPI activo (B1/B2/B3). Así Mi Portal y
-    Accionables trabajan sobre la misma población y el histórico antiguo no
-    contamina la gestión diaria del vendedor.
+    La gestion NO depende de ``es_medible``. Ese campo representa la
+    fotografia KPI del reporte Claro y se mantiene exclusivamente para
+    los calculos de Calidad.
+
+    Universo gestionable:
+    - venta ESACOM actualmente INSTALADA;
+    - estado de pago PENDIENTE;
+    - fecha de vencimiento informada;
+    - sin conflicto de fuente.
+
+    Clasificacion respecto de la fecha actual:
+    - fecha futura: POR VENCER;
+    - vence hoy: VENCE HOY;
+    - 1 a 8 dias vencida: VENCIDA GESTIONABLE;
+    - 9 dias o mas: VENCIDA, fuera de la ventana normal de gestion.
+
+    Si se informan ``focos``, se limita a las camadas/boletas indicadas.
     """
     from collections import defaultdict
     from django.utils import timezone
 
     hoy = timezone.localdate()
+
     buckets: dict[str, list[Corte]] = {
-        "vencidos": [],
-        "hoy": [],
-        "manana": [],
-        "prox_3d": [],
+        "por_vencer": [],
+        "vence_hoy": [],
+        "vencida_gestionable": [],
+        "vencida": [],
     }
 
     focos = focos or {}
+
+    # ESACOM define el universo comercial operativo:
+    # solo ventas actualmente INSTALADAS.
+    cortes = filtrar_cortes_kpi_operativos(cortes)
+
     cortes = cortes.filter(
         estado_pago=Corte.EstadoPago.PENDIENTE,
         fecha_vencimiento__isnull=False,
-        es_medible=True,
-    ).exclude(venta__conflicto_fuente=True)
+    ).exclude(
+        venta__conflicto_fuente=True
+    )
 
-    # Si existe snapshot activo, solo son accionables los focos oficiales.
+    # Cuando se entregan focos, limitar la gestion a esos periodos oficiales.
     foco_q = None
     for boleta in (Corte.Boleta.B1, Corte.Boleta.B2, Corte.Boleta.B3):
         mes = focos.get(boleta)
@@ -468,44 +487,73 @@ def resumen_accionables(cortes: QuerySet[Corte], focos: dict[str, str] | None = 
             continue
         q = Q(boleta=boleta, mes_ano=mes)
         foco_q = q if foco_q is None else foco_q | q
+
     if foco_q is not None:
         cortes = cortes.filter(foco_q)
 
     cortes = cortes.select_related(
-        "venta", "venta__promocion", "venta__ejecutivo", "venta__ejecutivo_ce", "ejecutivo_kpi"
+        "venta",
+        "venta__promocion",
+        "venta__ejecutivo",
+        "venta__ejecutivo_ce",
+        "ejecutivo_kpi",
     )
 
     for c in cortes:
-        dias = (c.fecha_vencimiento - hoy).days
-        if dias < 0:
-            buckets["vencidos"].append(c)
-        elif dias == 0:
-            buckets["hoy"].append(c)
-        elif dias == 1:
-            buckets["manana"].append(c)
-        elif 2 <= dias <= 3:
-            buckets["prox_3d"].append(c)
+        # Se conserva la semantica anterior:
+        # positivo = faltan dias, negativo = ya vencio.
+        dias_para_vencer = (c.fecha_vencimiento - hoy).days
+
+        if dias_para_vencer > 0:
+            buckets["por_vencer"].append(c)
+        elif dias_para_vencer == 0:
+            buckets["vence_hoy"].append(c)
+        elif -8 <= dias_para_vencer <= -1:
+            buckets["vencida_gestionable"].append(c)
+        else:
+            buckets["vencida"].append(c)
 
     resultado = {}
+
     for clave, lista in buckets.items():
-        camadas = defaultdict(lambda: {"rgu": 0, "clientes": set(), "casos": 0})
+        camadas = defaultdict(
+            lambda: {"rgu": 0, "clientes": set(), "casos": 0}
+        )
         items = []
-        for c in sorted(lista, key=lambda x: (x.fecha_vencimiento, x.venta.n_pedido)):
+
+        for c in sorted(
+            lista,
+            key=lambda x: (x.fecha_vencimiento, x.venta.n_pedido),
+        ):
             etiqueta = f"{c.mes_ano} · {c.get_boleta_display()}"
             rgu = _rgu_corte(c)
+
             camadas[etiqueta]["rgu"] += rgu
             camadas[etiqueta]["clientes"].add(c.venta.rut_cliente)
             camadas[etiqueta]["casos"] += 1
+
             propietario = c.venta.ejecutivo
-            dias = (c.fecha_vencimiento - hoy).days
-            if dias < 0:
-                estado_vencimiento = f"Vencido hace {abs(dias)} día{'s' if abs(dias) != 1 else ''}"
-            elif dias == 0:
+            dias_para_vencer = (c.fecha_vencimiento - hoy).days
+            dias_vencido = -dias_para_vencer
+
+            if clave == "por_vencer":
+                estado_vencimiento = (
+                    f"Por vencer · faltan {dias_para_vencer} "
+                    f"dia{'s' if dias_para_vencer != 1 else ''}"
+                )
+            elif clave == "vence_hoy":
                 estado_vencimiento = "Vence hoy"
-            elif dias == 1:
-                estado_vencimiento = "Vence mañana"
+            elif clave == "vencida_gestionable":
+                estado_vencimiento = (
+                    f"Vencida gestionable · +{dias_vencido} "
+                    f"dia{'s' if dias_vencido != 1 else ''}"
+                )
             else:
-                estado_vencimiento = f"Vence en {dias} días"
+                estado_vencimiento = (
+                    f"Vencida · +{dias_vencido} "
+                    f"dia{'s' if dias_vencido != 1 else ''}"
+                )
+
             items.append({
                 "corte_id": c.id,
                 "venta_id": c.venta_id,
@@ -516,8 +564,14 @@ def resumen_accionables(cortes: QuerySet[Corte], focos: dict[str, str] | None = 
                 "camada": c.mes_ano,
                 "boleta": c.boleta,
                 "fecha_vencimiento": c.fecha_vencimiento.isoformat(),
-                "dias_para_vencer": dias,
+                "fecha_limite_pago": (
+                    c.limite_pago.isoformat() if c.limite_pago else None
+                ),
+                "dias_para_vencer": dias_para_vencer,
+                "dias_vencido": dias_vencido,
                 "estado_vencimiento": estado_vencimiento,
+                "estado_gestion": clave,
+                "gestionable": clave != "vencida",
                 "rgu": rgu,
                 "ejecutivo": propietario.nombre if propietario else "",
             })
@@ -531,13 +585,18 @@ def resumen_accionables(cortes: QuerySet[Corte], focos: dict[str, str] | None = 
             "clientes": len(todos_los_clientes),
             "casos": len(items),
             "camadas": [
-                {"nombre": nombre, "rgu": v["rgu"], "clientes": len(v["clientes"]), "casos": v["casos"]}
+                {
+                    "nombre": nombre,
+                    "rgu": v["rgu"],
+                    "clientes": len(v["clientes"]),
+                    "casos": v["casos"],
+                }
                 for nombre, v in sorted(camadas.items())
             ],
             "items": items,
         }
-    return resultado
 
+    return resultado
 
 def resumen_equipo(ventas: QuerySet[Venta]) -> dict:
     """
@@ -682,7 +741,7 @@ def resumen_honorarios(ventas: QuerySet[Venta]) -> dict:
     únicamente a la producción/registro ESACOM de Honorarios; el KPI de Calidad
     se calcula por separado desde los snapshots de Claro.
     """
-    ventas = ventas.filter(origen_venta=Venta.OrigenVenta.HONORARIOS).select_related("promocion")
+    ventas = ventas.select_related("promocion")
     total_ventas = 0
     total_rgu = 0
     pagadas_ventas = 0
@@ -733,6 +792,12 @@ def resumen_honorarios(ventas: QuerySet[Venta]) -> dict:
         "ventas_sin_pago": pendientes_ventas,
         "rgu_sin_pago": pendientes_rgu,
         "pct_pago_referencial": float(pct_referencial),
+        "fuente_pago_referencial": "FECHA_PAGO_HONORARIOS",
+        "pago_claro_incluido": False,
+        "advertencia_pago": (
+            "Los registros sin fecha_pago_honorarios no acreditan impago CLARO. "
+            "Consultar KPI Calidad para estados oficiales de pago."
+        ),
         "camadas": camadas[:6],
     }
 
@@ -766,9 +831,12 @@ def resumen_kpi_honorarios_registros(registros) -> dict:
         else registros
     )
     for registro in iterable:
-        rgu = registro.rgu
+        snapshot = registro.snapshot_esacom or {}
+        rgu = snapshot.get("rgu") if snapshot else None
         if rgu is None and registro.venta_id:
             rgu = registro.venta.rgu_base
+        if rgu is None:
+            rgu = registro.rgu
         if rgu is None and registro.venta_id:
             rgu = getattr(registro.venta.promocion, "rgu", None)
         rgu = int(rgu or 1)
@@ -847,10 +915,28 @@ def resumen_kpi_registros(registros, meta_pct=0) -> dict:
         if hasattr(registros, "select_related")
         else registros
     )
-    for registro in iterable:
-        rgu = registro.rgu
+    registros_lista = list(iterable)
+
+    # Andes puede corregir el estado operativo de una venta ya verificada,
+    # pero nunca altera la población ESACOM congelada del reporte.
+    venta_ids = {r.venta_id for r in registros_lista if r.venta_id}
+    correcciones = {}
+    if venta_ids:
+        correcciones = {
+            (venta_id, mes_ano, boleta): estado_pago
+            for venta_id, mes_ano, boleta, estado_pago in Corte.objects.filter(
+                venta_id__in=venta_ids, verificado_en_andes=True
+            ).values_list("venta_id", "mes_ano", "boleta", "estado_pago")
+        }
+
+    for registro in registros_lista:
+        snapshot = registro.snapshot_esacom or {}
+        rgu = snapshot.get("rgu") if snapshot else None
         if rgu is None and registro.venta_id:
             rgu = registro.venta.rgu_base
+        if rgu is None:
+            # Solo fallback de auditoría para registros antiguos aún no sembrados.
+            rgu = registro.rgu
         if rgu is None and registro.venta_id:
             rgu = getattr(registro.venta.promocion, "rgu", None)
         rgu = int(rgu or 1)
@@ -858,7 +944,10 @@ def resumen_kpi_registros(registros, meta_pct=0) -> dict:
             fuera_medicion += rgu
             boletas_fuera_medicion += 1
             continue
-        estado = registro.estado_normalizado or Corte.EstadoPago.PENDIENTE
+        estado = correcciones.get(
+            (registro.venta_id, registro.camada, registro.boleta),
+            registro.estado_normalizado or Corte.EstadoPago.PENDIENTE,
+        )
         acumulado[estado] = acumulado.get(estado, 0) + rgu
         boletas_total += 1
         gestion[_bucket_gestion(registro.rango_pago, estado)] += rgu

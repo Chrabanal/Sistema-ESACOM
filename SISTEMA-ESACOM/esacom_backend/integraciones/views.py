@@ -302,7 +302,7 @@ def cargar_excel_view(request):
 
         dia_reporte = str(request.data.get("dia_reporte") or "OTRO").upper()
         if dia_reporte not in CargaExcel.DiaReporte.values:
-            return Response({"detail": "dia_reporte debe ser LUNES, MIERCOLES u OTRO."}, status=400)
+            return Response({"detail": "dia_reporte debe ser LUNES, MIERCOLES, JUEVES u OTRO."}, status=400)
 
         estado_reporte = str(request.data.get("estado_reporte") or "AVANCE").upper()
         if estado_reporte not in CargaExcel.EstadoReporte.values:

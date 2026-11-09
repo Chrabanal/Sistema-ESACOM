@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import KpiCard from "../components/KpiCard";
 import ClienteDetalleModal from "../components/ClienteDetalleModal";
-import { UrgenciaBarChart } from "../components/DashboardCharts";
+import { MotivosPendienteBarChart, UrgenciaBarChart } from "../components/DashboardCharts";
+import VencimientoPrimeraBoletaChart from "../components/VencimientoPrimeraBoletaChart";
 import { fetchAccionables, fetchDashboardKpiCompleto } from "../api/dashboard";
-import { fetchVentas, registrarGestion } from "../api/apelaciones";
+import { fetchVentas, registrarGestion, fetchCortesB1Pendientes } from "../api/apelaciones";
 
 const ESTADO_BADGE = {
   PENDIENTE_INSTALACION: "bg-orange-50 text-esacom-orange",
@@ -21,6 +22,45 @@ const ESTADO_LABEL = {
 };
 
 const NOMBRE_BOLETA = { B1: "1ª boleta", B2: "2ª boleta", B3: "3ª boleta" };
+
+const ESTADO_BOLETA = {
+  PAGADO: {
+    label: "Pagada",
+    clase: "bg-green-100 text-green-700",
+  },
+  PENDIENTE: {
+    label: "Pendiente",
+    clase: "bg-amber-100 text-amber-700",
+  },
+  NO_PAGO: {
+    label: "No pago",
+    clase: "bg-red-100 text-red-700",
+  },
+  FUERA_PLAZO: {
+    label: "Pagada fuera de plazo",
+    clase: "bg-orange-100 text-orange-700",
+  },
+  SIN_BOLETA: {
+    label: "Sin boleta",
+    clase: "bg-gray-100 text-gray-600",
+  },
+};
+
+function fechaCorta(valor) {
+  if (!valor) return "—";
+  const partes = String(valor).slice(0, 10).split("-");
+  if (partes.length !== 3) return valor;
+  return `${partes[2]}/${partes[1]}`;
+}
+
+function fechaVencida(valor) {
+  if (!valor) return false;
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+
+  const fecha = new Date(`${String(valor).slice(0, 10)}T12:00:00`);
+  return fecha < hoy;
+}
 
 function normalizarBusqueda(valor = "") {
   return String(valor)
@@ -52,53 +92,241 @@ function whatsappHref(telefono) {
   return `https://wa.me/56${telefono.replace(/^0+/, "")}`;
 }
 
-function ClienteCard({ venta, onDetalle, activoPago = false }) {
+function ClienteCard({
+  venta,
+  onDetalle,
+  activoPago = false,
+  mesSeleccionado,
+  boletaActivaMes,
+}) {
   const [enviando, setEnviando] = useState(null);
+
+  const cortesResumen = Array.isArray(venta.cortes_resumen)
+    ? venta.cortes_resumen
+    : [];
+
+  const corteActual =
+    cortesResumen.find(
+      (c) =>
+        c.mes_ano === mesSeleccionado &&
+        (!boletaActivaMes || c.boleta === boletaActivaMes)
+    ) || null;
+
+  const estadoBoleta = corteActual
+    ? ESTADO_BOLETA[corteActual.estado_pago] || {
+        label: corteActual.estado_pago || "Aún sin boleta",
+        clase: "bg-gray-100 text-gray-600",
+      }
+    : null;
+
+  const estadoVisual = {
+    INSTALADO: {
+      borde: "border-l-green-500",
+      fondo: "bg-green-50/30",
+    },
+    PENDIENTE_INSTALACION: {
+      borde: "border-l-orange-500",
+      fondo: "bg-orange-50/30",
+    },
+    PENDIENTE_COMERCIAL: {
+      borde: "border-l-yellow-500",
+      fondo: "bg-yellow-50/30",
+    },
+    ANULADO: {
+      borde: "border-l-red-500",
+      fondo: "bg-red-50/30",
+    },
+  };
+
+  const visual = estadoVisual[venta.estado_instalacion] || {
+    borde: "border-l-gray-300",
+    fondo: "bg-white",
+  };
 
   async function handleClick(tipo, href) {
     setEnviando(tipo);
+
     try {
-      // Solo deja una huella automática del contacto. El Ejecutivo no edita
-      // clientes, estados, metas ni datos maestros.
       await registrarGestion(venta.id, tipo);
     } catch {
-      // El contacto no debe bloquearse por una falla al guardar auditoría.
+      // El contacto no debe bloquearse por una falla de auditoría.
     } finally {
       setEnviando(null);
-      window.open(href, "_blank");
+
+      if (href) {
+        window.open(href, "_blank");
+      }
     }
   }
 
   return (
-    <div className="bg-white rounded-2xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div>
-          <p className="font-semibold text-gray-900 text-sm leading-snug">{venta.nombre_cliente || venta.rut_cliente}</p>
-          <p className="text-xs text-gray-400">{venta.rut_cliente} · {venta.n_pedido}</p>
-        </div>
-        <div className="flex flex-wrap justify-end gap-1.5">
-          {activoPago && <span className="whitespace-nowrap rounded-full bg-green-100 px-2.5 py-1 text-[10px] font-bold text-green-800 sm:text-[11px]">Activo · pagó boleta</span>}
-          <span className={`text-[10px] sm:text-[11px] whitespace-nowrap font-semibold px-2.5 py-1 rounded-full ${ESTADO_BADGE[venta.estado_instalacion] || "bg-gray-100 text-gray-500"}`}>
-            {ESTADO_LABEL[venta.estado_instalacion] || venta.estado_instalacion}
-          </span>
-        </div>
-      </div>
-      <p className="text-xs text-gray-500 mt-2">{venta.promocion?.nombre || "Producto sin detalle"}</p>
-      <button onClick={() => onDetalle?.(venta.id)} className="mt-3 w-full min-h-11 text-xs font-semibold rounded-xl py-2.5 border border-gray-200 text-gray-700 hover:bg-gray-50 active:scale-[0.99] transition">
-        Ver historial / boletas
-      </button>
+    <article
+      className={`overflow-hidden rounded-2xl border border-gray-200 border-l-4 ${visual.borde} ${visual.fondo} shadow-sm transition hover:-translate-y-0.5 hover:shadow-md`}
+    >
+      <div className="p-4">
 
-      {venta.telefono_cliente ? (
-        <div className="grid grid-cols-2 gap-2 mt-3">
-          <button onClick={() => handleClick("LLAMADA", telHref(venta.telefono_cliente))} disabled={enviando === "LLAMADA"} className="min-h-11 text-xs font-semibold rounded-xl py-2.5 bg-green-50 text-esacom-green hover:bg-green-100 transition-colors disabled:opacity-60">
-            📞 Llamar
-          </button>
-          <button onClick={() => handleClick("WHATSAPP", whatsappHref(venta.telefono_cliente))} disabled={enviando === "WHATSAPP"} className="min-h-11 text-xs font-semibold rounded-xl py-2.5 bg-green-50 text-esacom-green hover:bg-green-100 transition-colors disabled:opacity-60">
-            WhatsApp
-          </button>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-extrabold leading-snug text-gray-900">
+              {venta.nombre_cliente || venta.rut_cliente}
+            </p>
+
+            <p className="mt-1 text-[11px] text-gray-400">
+              RUT {venta.rut_cliente || "—"}
+            </p>
+          </div>
+
+          <div className="flex shrink-0 flex-col items-end gap-1.5">
+            <span
+              className={`whitespace-nowrap rounded-full px-2.5 py-1 text-[10px] font-bold ${
+                ESTADO_BADGE[venta.estado_instalacion] ||
+                "bg-gray-100 text-gray-500"
+              }`}
+            >
+              {ESTADO_LABEL[venta.estado_instalacion] ||
+                venta.estado_instalacion}
+            </span>
+
+            {activoPago && (
+              <span className="whitespace-nowrap rounded-full bg-emerald-100 px-2.5 py-1 text-[9px] font-bold text-emerald-800">
+                PAGÓ BOLETA
+              </span>
+            )}
+          </div>
         </div>
-      ) : <p className="text-[11px] text-gray-300 mt-3">Sin teléfono registrado</p>}
-    </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div className="rounded-xl border border-gray-100 bg-white/80 px-3 py-2.5">
+            <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">
+              Pedido
+            </p>
+
+            <p className="mt-1 break-all text-xs font-bold text-gray-800">
+              {venta.n_pedido || "—"}
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-gray-100 bg-white/80 px-3 py-2.5">
+            <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">
+              Servicio
+            </p>
+
+            <p className="mt-1 text-xs font-semibold text-gray-700">
+              {venta.promocion?.nombre || "Sin detalle"}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-xl border border-blue-100 bg-white/90 px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wide text-gray-400">
+                Boleta actual
+              </p>
+
+              {corteActual ? (
+                <p className="mt-1 text-xs font-extrabold text-gray-900">
+                  {corteActual.boleta}
+                  <span className="ml-1 font-medium text-gray-400">
+                    · {NOMBRE_BOLETA[corteActual.boleta] || corteActual.boleta}
+                  </span>
+                </p>
+              ) : (
+                <p className="mt-1 text-xs font-semibold text-gray-400">
+                  Sin información
+                </p>
+              )}
+            </div>
+
+            {estadoBoleta && (
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[10px] font-bold ${estadoBoleta.clase}`}
+              >
+                {estadoBoleta.label}
+              </span>
+            )}
+          </div>
+
+          {corteActual && (
+            <div className="mt-2 border-t border-gray-100 pt-2">
+              {corteActual.estado_pago === "PAGADO" && corteActual.fecha_pago ? (
+                <p className="text-[11px] font-semibold text-green-700">
+                  Pagada {fechaCorta(corteActual.fecha_pago)}
+                </p>
+              ) : corteActual.fecha_vencimiento ? (
+                <p
+                  className={`text-[11px] font-semibold ${
+                    fechaVencida(corteActual.fecha_vencimiento)
+                      ? "text-red-600"
+                      : "text-gray-600"
+                  }`}
+                >
+                  {fechaVencida(corteActual.fecha_vencimiento)
+                    ? "⚠ Venció"
+                    : "Vence"}{" "}
+                  {fechaCorta(corteActual.fecha_vencimiento)}
+                </p>
+              ) : (
+                <p className="text-[11px] text-gray-400">
+                  Sin fecha de vencimiento
+                </p>
+              )}
+
+              {corteActual.estado_calculado === "FUERA_MEDICION" && (
+                <p className="mt-1 text-[10px] font-semibold text-blue-600">
+                  Fuera de medición
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => onDetalle?.(venta.id)}
+          className="mt-3 flex min-h-10 w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 transition hover:bg-gray-50 active:scale-[0.99]"
+        >
+          Ver historial y boletas →
+        </button>
+
+        {venta.telefono_cliente ? (
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() =>
+                handleClick("LLAMADA", telHref(venta.telefono_cliente))
+              }
+              disabled={enviando === "LLAMADA"}
+              className="min-h-11 rounded-xl border border-green-200 bg-white px-3 text-xs font-bold text-green-700 transition hover:bg-green-50 disabled:opacity-60"
+            >
+              {enviando === "LLAMADA" ? "Abriendo…" : "📞 Llamar"}
+            </button>
+
+            <button
+              type="button"
+              onClick={() =>
+                handleClick(
+                  "WHATSAPP",
+                  whatsappHref(venta.telefono_cliente)
+                )
+              }
+              disabled={enviando === "WHATSAPP"}
+              className="min-h-11 rounded-xl bg-green-600 px-3 text-xs font-bold text-white shadow-sm transition hover:bg-green-700 disabled:opacity-60"
+            >
+              {enviando === "WHATSAPP"
+                ? "Abriendo…"
+                : "WhatsApp"}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 rounded-xl bg-gray-100 px-3 py-3 text-center">
+            <p className="text-[11px] font-medium text-gray-400">
+              Sin teléfono registrado
+            </p>
+          </div>
+        )}
+      </div>
+    </article>
   );
 }
 
@@ -113,6 +341,24 @@ function IndicadorPrincipal({ label, valor, detalle, tono = "azul" }) {
       <p className="text-[10px] uppercase tracking-wide font-bold opacity-75">{label}</p>
       <p className="mt-1 text-2xl font-extrabold tracking-tight">{valor}</p>
       <p className="mt-1 text-[11px] leading-snug opacity-75">{detalle}</p>
+    </div>
+  );
+}
+
+function ResumenHoyCard({ titulo, valor, detalle, tono = "gris" }) {
+  const tonos = {
+    gris: "border-gray-200 bg-white text-gray-900",
+    verde: "border-green-100 bg-green-50 text-green-800",
+    azul: "border-blue-100 bg-blue-50 text-blue-800",
+    naranja: "border-orange-100 bg-orange-50 text-orange-800",
+    rojo: "border-red-100 bg-red-50 text-red-800",
+  };
+
+  return (
+    <div className={`rounded-2xl border p-4 shadow-sm ${tonos[tono] || tonos.gris}`}>
+      <p className="text-[10px] font-bold uppercase tracking-wide opacity-70">{titulo}</p>
+      <p className="mt-2 text-2xl font-extrabold tracking-tight">{valor}</p>
+      <p className="mt-1 text-[11px] leading-snug opacity-80">{detalle}</p>
     </div>
   );
 }
@@ -164,12 +410,13 @@ function HistoricoCard({ corte }) {
 }
 
 export default function PortalEjecutivo() {
-  const [tab, setTab] = useState("kpi");
+  const [tab, setTab] = useState("resumen");
   const [cortes, setCortes] = useState(null);
   const [historicoKpi, setHistoricoKpi] = useState([]);
   const [perfilKpi, setPerfilKpi] = useState("REGULAR");
   const [honorarios, setHonorarios] = useState(null);
   const [produccionMes, setProduccionMes] = useState(null);
+  const [produccionActual, setProduccionActual] = useState(null);
   const [resumenMes, setResumenMes] = useState(null);
   const [mesActual, setMesActual] = useState(mesCalendario(0));
   const [mesAnterior, setMesAnterior] = useState(mesCalendario(-1));
@@ -178,7 +425,10 @@ export default function PortalEjecutivo() {
   const [clientesActivosActuales, setClientesActivosActuales] = useState(null);
   const [clientesActivosAnteriores, setClientesActivosAnteriores] = useState(null);
   const [mesClientes, setMesClientes] = useState("ACTUAL");
-  const [filtroClientes, setFiltroClientes] = useState("GESTIONABLES");
+  const [fechaVencimientoSeleccionada, setFechaVencimientoSeleccionada] = useState(null);
+  const [cortesB1, setCortesB1] = useState(null);
+  const [errorCortesB1, setErrorCortesB1] = useState("");
+  const [filtroClientes, setFiltroClientes] = useState("TODOS_ACTIVOS");
   const [busqueda, setBusqueda] = useState("");
   const [error, setError] = useState("");
   const [ventaDetalle, setVentaDetalle] = useState(null);
@@ -195,6 +445,7 @@ export default function PortalEjecutivo() {
       setPerfilKpi(data.perfil_kpi || "REGULAR");
       setHonorarios(data.honorarios || null);
       setProduccionMes(data.produccion_mes_actual || null);
+      setProduccionActual(data.produccion_actual || null);
       setResumenMes(data.resumen_mes_actual || null);
       if (data.mes_actual) setMesActual(data.mes_actual);
       if (data.mes_anterior) setMesAnterior(data.mes_anterior);
@@ -272,22 +523,114 @@ export default function PortalEjecutivo() {
     }
   }
 
+  const mesB1 = mesClientes === "ACTUAL" ? mesActual : mesAnterior;
+
+  useEffect(() => {
+    setFechaVencimientoSeleccionada(null);
+  }, [mesB1]);
+
+  useEffect(() => {
+    let vigente = true;
+    setCortesB1(null);
+    setErrorCortesB1("");
+
+    fetchCortesB1Pendientes(mesB1)
+      .then((datos) => {
+        if (vigente) setCortesB1(datos);
+      })
+      .catch(() => {
+        if (vigente) {
+          setCortesB1([]);
+          setErrorCortesB1("No se pudieron consultar los vencimientos B1.");
+        }
+      });
+
+    return () => {
+      vigente = false;
+    };
+  }, [mesB1]);
+
   const clientesMes = mesClientes === "ACTUAL" ? clientesActuales : clientesAnteriores;
   const clientesActivosMes = mesClientes === "ACTUAL" ? clientesActivosActuales : clientesActivosAnteriores;
   const mesSeleccionado = mesClientes === "ACTUAL" ? mesActual : mesAnterior;
   const boletaActivaMes = (cortes || []).find((c) => c.mes_ano === mesSeleccionado)?.boleta || null;
   const q = normalizarBusqueda(busqueda);
 
+  const motivosPendienteComercial = useMemo(() => {
+    const conteo = new Map();
+
+    for (const venta of clientesMes || []) {
+      if (venta.estado_instalacion !== "PENDIENTE_COMERCIAL") continue;
+
+      const motivo =
+        String(venta.motivo_pendiente || "").trim() ||
+        "Sin motivo informado";
+
+      conteo.set(motivo, (conteo.get(motivo) || 0) + 1);
+    }
+
+    return [...conteo.entries()]
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value);
+  }, [clientesMes]);
+
   const clientesFiltrados = useMemo(() => {
-    const base = filtroClientes === "ACTIVOS_PAGO" ? (clientesActivosMes || []) : (clientesMes || []);
+    const base =
+      filtroClientes === "ACTIVOS_PAGO"
+        ? (clientesActivosMes || [])
+        : (clientesMes || []);
+
     return base.filter((venta) => {
-      if (filtroClientes === "GESTIONABLES" && venta.estado_instalacion === "ANULADO") return false;
-      if (!["GESTIONABLES", "ACTIVOS_PAGO"].includes(filtroClientes) && venta.estado_instalacion !== filtroClientes) return false;
+      if (
+        filtroClientes === "TODOS_ACTIVOS" &&
+        venta.estado_instalacion === "ANULADO"
+      ) {
+        return false;
+      }
+
+      if (
+        !["TODOS_ACTIVOS", "ACTIVOS_PAGO"].includes(filtroClientes) &&
+        venta.estado_instalacion !== filtroClientes
+      ) {
+        return false;
+      }
+
       if (!q) return true;
-      const texto = normalizarBusqueda([venta.nombre_cliente, venta.rut_cliente].filter(Boolean).join(" "));
-      return q.split(/\s+/).every((parte) => texto.includes(parte));
+
+      const texto = normalizarBusqueda(
+        [venta.nombre_cliente, venta.rut_cliente]
+          .filter(Boolean)
+          .join(" ")
+      );
+
+      return q
+        .split(/\s+/)
+        .every((parte) => texto.includes(parte));
     });
   }, [clientesMes, clientesActivosMes, filtroClientes, q]);
+
+  const conteosClientes = useMemo(() => {
+    const base = clientesMes || [];
+
+    return {
+      TODOS_ACTIVOS: base.filter(
+        (v) => v.estado_instalacion !== "ANULADO"
+      ).length,
+      INSTALADO: base.filter(
+        (v) => v.estado_instalacion === "INSTALADO"
+      ).length,
+      PENDIENTE_INSTALACION: base.filter(
+        (v) => v.estado_instalacion === "PENDIENTE_INSTALACION"
+      ).length,
+      PENDIENTE_COMERCIAL: base.filter(
+        (v) => v.estado_instalacion === "PENDIENTE_COMERCIAL"
+      ).length,
+      ANULADO: base.filter(
+        (v) => v.estado_instalacion === "ANULADO"
+      ).length,
+      ACTIVOS_PAGO: (clientesActivosMes || []).length,
+    };
+  }, [clientesMes, clientesActivosMes]);
 
   const resultadosBusqueda = useMemo(() => {
     if (q.length < 2) return [];
@@ -303,23 +646,46 @@ export default function PortalEjecutivo() {
   }, [q, clientesActuales, clientesAnteriores, clientesActivosActuales, clientesActivosAnteriores]);
 
   const cortePrincipal = (cortes || [])[0];
-  const mesCalidadPendiente = cortePrincipal?.mes_ano && mesActual > cortePrincipal.mes_ano ? mesActual : null;
+  const tieneKpiMesActual = (cortes || []).some((c) => c.mes_ano === mesActual);
+  const mesCalidadPendiente = cortes !== null && !tieneKpiMesActual ? mesActual : null;
   const completadas = (clientesActuales || []).filter((v) => v.estado_instalacion === "INSTALADO");
   const kpiCalidad = Number(cortePrincipal?.pct_cumplimiento || 0);
   const metaCalidad = Number(cortePrincipal?.meta_pct || 0);
   const tieneMetaCalidad = cortePrincipal?.meta_definida !== false && metaCalidad > 0;
   const cumpleCalidad = cortePrincipal?.tiene_datos !== false && tieneMetaCalidad && kpiCalidad >= metaCalidad;
   const rguFijoVendidos = produccionMes?.rgu_fijo_vendidos ?? produccionMes?.fija?.rgu_total_base_vigente ?? produccionMes?.kpi_fijo_rgu ?? 0;
-  const rguFijoGestionables = produccionMes?.rgu_fijo_gestionables ?? produccionMes?.fija?.total_control ?? 0;
+  const rguFijoOperativos = produccionMes?.rgu_fijo_gestionables ?? produccionMes?.fija?.total_control ?? 0;
   const ventasFijo = produccionMes?.ventas_fijo ?? produccionMes?.fija?.total_base_vigente ?? 0;
   const rguFijoAnulados = produccionMes?.rgu_fijo_anulados ?? produccionMes?.fija?.anuladas ?? 0;
+  const clientesPorVencer = accionables?.por_vencer?.clientes || 0;
+  const clientesHoy = accionables?.vence_hoy?.clientes || 0;
+  const clientesVencidaGestionable = accionables?.vencida_gestionable?.clientes || 0;
+  const clientesFueraPlazo = accionables?.vencida?.clientes || 0;
+
+  const rguPorVencer = accionables?.por_vencer?.rgu || 0;
+  const rguHoy = accionables?.vence_hoy?.rgu || 0;
+  const rguVencidaGestionable = accionables?.vencida_gestionable?.rgu || 0;
+  const rguFueraPlazo = accionables?.vencida?.rgu || 0;
+
+  const clientesGestionarAhora = clientesHoy + clientesVencidaGestionable;
+  const rguGestionarAhora = rguHoy + rguVencidaGestionable;
+  const rguPendientes = cortePrincipal?.pendientes || 0;
+  const mensajeCumplimiento = !cortePrincipal || cortePrincipal?.tiene_datos === false
+    ? "Claro todavía no informa una medición vigente para este período."
+    : perfilKpi === "HONORARIOS"
+      ? `KPI real de pago ${kpiCalidad.toFixed(2)}%. Meta Honorarios pendiente.`
+      : cumpleCalidad
+        ? `Vas cumpliendo la meta ESACOM de ${metaCalidad.toFixed(0)}%.`
+        : `Todavía faltan ${cortePrincipal?.faltan_para_meta || 0} RGU para llegar a la meta ESACOM.`;
 
   return (
     <Layout titulo="Mi Portal" items={[{ label: "Accionables", to: "/accionables" }]}>
       <section className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 sm:p-5 shadow-sm" aria-label="Buscar mis clientes">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-extrabold text-esacom-ink">Busca tus clientes</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-base font-extrabold text-esacom-ink">Busca tus clientes</h2>
+            </div>
             <p className="mt-1 text-xs text-gray-500">Escribe el RUT o el nombre. Busca en tu cartera del mes actual/anterior e incluye clientes activos por pago.</p>
           </div>
           <button type="button" onClick={actualizarTodo} disabled={actualizando} className="shrink-0 rounded-xl border border-gray-200 px-3 py-2 text-xs font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">
@@ -342,98 +708,281 @@ export default function PortalEjecutivo() {
         )}
       </section>
 
-      <section className="mb-5" aria-labelledby="resumen-actual">
-          <div className="mb-3">
-            <h2 id="resumen-actual" className="text-lg font-extrabold tracking-tight text-esacom-ink">Resumen actual</h2>
-            <p className="text-xs text-gray-500">Tus ventas vienen de ESACOM. Calidad se actualiza con los reportes de Claro y puede venir un mes desfasada.</p>
-          </div>
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
-            <IndicadorPrincipal
-              label={`${perfilKpi === "HONORARIOS" ? "Calidad de pago Honorarios" : "Calidad de pago"} · ${cortePrincipal ? nombreMes(cortePrincipal.mes_ano) : "Sin medición"}`}
-              valor={!cortePrincipal || cortePrincipal?.tiene_datos === false ? "Sin datos" : `${kpiCalidad.toFixed(2)}%`}
-              detalle={cortePrincipal ? (perfilKpi === "HONORARIOS" ? "KPI real de pago · Meta Honorarios pendiente" : `${cumpleCalidad ? "✓ Cumples" : "Aún no cumples"} · Meta ESACOM ${metaCalidad.toFixed(0)}%`) : "Claro aún no entrega una medición vigente"}
-              tono="azul"
-            />
-            <IndicadorPrincipal
-              label={`Ventas Fijo · ${nombreMes(mesActual)} · ESACOM`}
-              valor={`${rguFijoVendidos} RGU vendidos`}
-              detalle={`${ventasFijo} ventas · ${rguFijoGestionables} gestionables · ${rguFijoAnulados} RGU ${rguFijoAnulados === 1 ? "anulado" : "anulados"}`}
-              tono="verde"
-            />
-            <IndicadorPrincipal
-              label={`Ventas Móvil · ${nombreMes(mesActual)} · ESACOM`}
-              valor={`${produccionMes?.kpi_movil_portadas ?? 0} portadas`}
-              detalle={`Principal ${produccionMes?.movil?.principal ?? 0} · Adicional ${produccionMes?.movil?.adicional ?? 0}`}
-              tono="lima"
-            />
-          </div>
-          <div className="mt-3 flex flex-col gap-1 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-[11px] text-blue-800 sm:flex-row sm:items-center sm:justify-between">
-            <span><strong>{nombreMes(mesActual)}</strong>: ventas y RGU actuales según la base oficial ESACOM.</span>
-            <span><strong>{cortePrincipal ? nombreMes(cortePrincipal.mes_ano) : "Calidad"}</strong>: período que Claro está midiendo actualmente.</span>
-          </div>
-        </section>
-
-      {resumenMes && (
-        <section className="mb-5 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Resumen del mes actual">
-          <div className="flex items-center justify-between gap-3">
-            <div><p className="text-sm font-bold text-gray-900">Actividad · {nombreMes(resumenMes.mes || mesActual)}</p><p className="text-[11px] text-gray-500">Solo ventas y clientes del mes actual.</p></div>
-            <span className="rounded-full bg-esacom-lime-light px-3 py-1 text-xs font-bold text-esacom-ink">{resumenMes.avance_instalacion_pct || 0}% instalación</span>
-          </div>
-          <div className="mt-3 grid grid-cols-4 gap-2 text-center">
-            {[["Ventas", resumenMes.total], ["Instaladas", resumenMes.instaladas], ["Pend. inst.", resumenMes.pendiente_instalacion], ["Pend. com.", resumenMes.pendiente_comercial]].map(([l, v]) => (
-              <div key={l} className="rounded-xl bg-gray-50 px-2 py-3"><p className="text-lg font-extrabold text-gray-900">{v || 0}</p><p className="text-[9px] text-gray-500">{l}</p></div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {perfilKpi !== "HONORARIOS" && accionables && (
-        <section className="mb-5 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm" aria-label="Prioridades de gestión">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-extrabold text-gray-900">Qué atender ahora</p>
-              <p className="mt-1 text-[11px] text-gray-500">Tus pendientes de Calidad del período en curso, ordenados por vencimiento.</p>
-            </div>
-            <a href="/accionables" className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gray-900 px-4 text-xs font-semibold text-white">Gestionar ahora →</a>
-          </div>
-          <div className="mt-3 grid gap-3 lg:grid-cols-[1.05fr_0.95fr]">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
-              {[
-                ["Vencidos", accionables.vencidos, "bg-red-50 text-red-800"],
-                ["Hoy", accionables.hoy, "bg-orange-50 text-orange-800"],
-                ["Mañana", accionables.manana, "bg-yellow-50 text-yellow-800"],
-                ["Próx. 3 días", accionables.prox_3d, "bg-blue-50 text-blue-800"],
-              ].map(([label, dato, clase]) => (
-                <div key={label} className={`rounded-xl p-3 ${clase}`}>
-                  <p className="text-[10px] font-bold uppercase opacity-70">{label}</p>
-                  <p className="mt-1 text-xl font-extrabold">{dato?.clientes || 0} <span className="text-xs font-semibold">clientes</span></p>
-                  <p className="mt-1 text-[10px] opacity-70">{dato?.rgu || 0} RGU · {dato?.casos || 0} casos</p>
-                </div>
-              ))}
-            </div>
-            <UrgenciaBarChart
-              titulo="Prioridad visual"
-              subtitulo="RGU por vencimiento para decidir dónde actuar primero."
-              items={[
-                { name: "Vencidos", value: accionables.vencidos?.rgu },
-                { name: "Hoy", value: accionables.hoy?.rgu },
-                { name: "Mañana", value: accionables.manana?.rgu },
-                { name: "Próx. 3 días", value: accionables.prox_3d?.rgu },
-              ]}
-            />
-          </div>
-        </section>
-      )}
-
-      <div className="sticky top-[57px] z-20 -mx-3 mb-4 bg-gray-50/95 px-3 py-2 backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-0">
-        <div className="grid grid-cols-4 gap-1 rounded-2xl border border-gray-200 bg-white p-1 shadow-sm sm:border-0 sm:bg-transparent sm:shadow-none">
-          {[["kpi", "Mi KPI"], ["clientes", "Mis Clientes"], ["historico", "Histórico"], ["completadas", "Completadas"]].map(([key, label]) => (
-            <button key={key} onClick={() => setTab(key)} className={`rounded-xl px-1.5 py-2.5 text-[11px] transition-colors sm:px-4 sm:text-sm ${tab === key ? "bg-esacom-lime-light font-semibold text-esacom-ink" : "text-gray-500 hover:text-esacom-ink"}`}>
+      <div className="sticky top-[57px] z-20 -mx-3 mb-5 bg-gray-50/95 px-3 py-2 backdrop-blur sm:static sm:mx-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-0">
+        <div className="grid grid-cols-5 gap-1 rounded-2xl border border-gray-200 bg-white p-1 shadow-sm sm:border-0 sm:bg-transparent sm:shadow-none">
+          {[
+            ["resumen", "Resumen"],
+            ["kpi", "Mi KPI"],
+            ["clientes", "Mis Clientes"],
+            ["historico", "Histórico"],
+            ["completadas", "Completadas"],
+          ].map(([key, label]) => (
+            <button key={key} onClick={() => setTab(key)} className={`rounded-xl px-1 py-2.5 text-[10px] transition-colors sm:px-4 sm:text-sm ${tab === key ? "bg-esacom-lime-light font-semibold text-esacom-ink" : "text-gray-500 hover:text-esacom-ink"}`}>
               {label}
             </button>
           ))}
         </div>
       </div>
+
+      {tab === "resumen" && (
+        <>
+      <section className="mb-5" aria-labelledby="resumen-hoy">
+        <div className="mb-3">
+          <h2
+            id="resumen-hoy"
+            className="text-lg font-extrabold tracking-tight text-esacom-ink"
+          >
+            Qué debes hacer hoy
+          </h2>
+          <p className="text-xs text-gray-500">
+            Primero gestiona los casos urgentes. Después anticipa los próximos pagos.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+
+          {/* GESTIONAR AHORA */}
+          <div className={`rounded-2xl border p-4 shadow-sm ${
+            clientesGestionarAhora > 0
+              ? "border-orange-200 bg-orange-50"
+              : "border-gray-200 bg-white"
+          }`}>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-orange-700">
+              Gestionar ahora
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-gray-900">
+              {clientesGestionarAhora}
+              <span className="ml-2 text-sm font-semibold text-gray-500">
+                {clientesGestionarAhora === 1 ? "cliente" : "clientes"}
+              </span>
+            </p>
+
+            <p className="mt-1 text-xs text-gray-600">
+              {rguGestionarAhora} RGU requieren atención inmediata.
+            </p>
+
+            <p className="mt-2 text-[11px] text-gray-500">
+              {clientesHoy} vencen hoy · {clientesVencidaGestionable} están vencidos pero aún dentro de la ventana de pago.
+            </p>
+
+            <a
+              href="/accionables?estado=vencida_gestionable"
+              className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-orange-600 px-3 text-xs font-bold text-white transition hover:bg-orange-700"
+            >
+              Gestionar ahora →
+            </a>
+          </div>
+
+          {/* ANTICIPAR PAGOS */}
+          <div className={`rounded-2xl border p-4 shadow-sm ${
+            clientesPorVencer > 0
+              ? "border-blue-200 bg-blue-50"
+              : "border-gray-200 bg-white"
+          }`}>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-blue-700">
+              Anticipar pagos
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-gray-900">
+              {clientesPorVencer}
+              <span className="ml-2 text-sm font-semibold text-gray-500">
+                {clientesPorVencer === 1 ? "cliente" : "clientes"}
+              </span>
+            </p>
+
+            <p className="mt-1 text-xs text-gray-600">
+              {rguPorVencer} RGU todavía no vencen.
+            </p>
+
+            <p className="mt-2 text-[11px] text-gray-500">
+              Contáctalos antes del vencimiento para aumentar la probabilidad de pago.
+            </p>
+
+            <a
+              href="/accionables?estado=por_vencer"
+              className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-blue-600 px-3 text-xs font-bold text-white transition hover:bg-blue-700"
+            >
+              Ver clientes →
+            </a>
+          </div>
+
+          {/* KPI */}
+          <div className={`rounded-2xl border p-4 shadow-sm ${
+            cumpleCalidad
+              ? "border-green-200 bg-green-50"
+              : "border-red-200 bg-red-50"
+          }`}>
+            <p className={`text-[10px] font-extrabold uppercase tracking-wide ${
+              cumpleCalidad ? "text-green-700" : "text-red-700"
+            }`}>
+              Tu KPI
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-gray-900">
+              {!cortePrincipal || cortePrincipal?.tiene_datos === false
+                ? "Sin medición"
+                : `${kpiCalidad.toFixed(2)}%`}
+            </p>
+
+            <p className="mt-1 text-xs text-gray-600">
+              {mensajeCumplimiento}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => setTab("kpi")}
+              className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-gray-200 bg-white px-3 text-xs font-bold text-gray-700 transition hover:bg-gray-50"
+            >
+              Ver Mi KPI →
+            </button>
+          </div>
+
+          {/* FUERA DE PLAZO */}
+          <div className={`rounded-2xl border p-4 shadow-sm ${
+            clientesFueraPlazo > 0
+              ? "border-red-200 bg-red-50"
+              : "border-gray-200 bg-white"
+          }`}>
+            <p className="text-[10px] font-extrabold uppercase tracking-wide text-red-700">
+              Fuera de plazo
+            </p>
+
+            <p className="mt-2 text-3xl font-black text-gray-900">
+              {clientesFueraPlazo}
+              <span className="ml-2 text-sm font-semibold text-gray-500">
+                {clientesFueraPlazo === 1 ? "cliente" : "clientes"}
+              </span>
+            </p>
+
+            <p className="mt-1 text-xs text-gray-600">
+              {rguFueraPlazo} RGU superaron la ventana de +8 días.
+            </p>
+
+            <p className="mt-2 text-[11px] text-gray-500">
+              Se mantienen visibles para seguimiento y trazabilidad.
+            </p>
+
+            <a
+              href="/accionables?estado=vencida"
+              className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-red-200 bg-white px-3 text-xs font-bold text-red-700 transition hover:bg-red-50"
+            >
+              Ver casos →
+            </a>
+          </div>
+
+        </div>
+
+        <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-[11px] text-blue-800">
+          <strong>Regla simple:</strong> primero atiende los vencimientos urgentes,
+          luego anticipa los próximos pagos. El KPI se actualiza según la información
+          reportada por Claro.
+        </div>
+      </section>
+
+      <section className="mb-5" aria-labelledby="produccion-esacom">
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h2 id="produccion-esacom" className="text-lg font-extrabold tracking-tight text-esacom-ink">Producción del mes · {nombreMes(mesActual)}</h2>
+            <p className="text-xs text-gray-500">Solo ventas del mes calendario: Fijo por RGU y Móvil por portadas efectivas vendidas en este período. Tu Calidad Claro se detalla en “Mi KPI”.</p>
+          </div>
+          <span className="text-[10px] font-semibold text-green-700">Fuente oficial: ESACOM</span>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <IndicadorPrincipal
+            label={`Ventas Fijo · ${nombreMes(mesActual)}`}
+            valor={`${rguFijoVendidos} RGU vendidos`}
+            detalle={`${ventasFijo} ventas · ${rguFijoOperativos} RGU operativos · ${rguFijoAnulados} RGU ${rguFijoAnulados === 1 ? "anulado" : "anulados"}`}
+            tono="verde"
+          />
+          <IndicadorPrincipal
+            label={`Portadas Móvil · ${nombreMes(mesActual)}`}
+            valor={`${produccionMes?.kpi_movil_portadas ?? 0} portadas`}
+            detalle={`Del mes · Principal ${produccionMes?.movil?.principal ?? 0} · Adicional ${produccionMes?.movil?.adicional ?? 0}`}
+            tono="lima"
+          />
+        </div>
+
+        <div className="mt-3 flex flex-col gap-1 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-3 text-[11px] text-blue-800 sm:flex-row sm:items-center sm:justify-between">
+          <span><strong>{nombreMes(mesActual)}</strong>: ventas Fijo y RGU del mes según ESACOM.</span>
+          <span><strong>{cortePrincipal ? nombreMes(cortePrincipal.mes_ano) : "Calidad"}</strong>: período que Claro está midiendo actualmente.</span>
+        </div>
+      </section>
+
+      <section
+        className="mb-5 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+        aria-labelledby="control-operativo-esacom"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2
+              id="control-operativo-esacom"
+              className="text-sm font-extrabold text-gray-900"
+            >
+              Control operativo hoy
+            </h2>
+            <p className="mt-0.5 text-[10px] text-gray-400">
+              Estado vigente según ESACOM.
+            </p>
+          </div>
+
+          <span className="rounded-full bg-green-50 px-2.5 py-1 text-[9px] font-bold text-green-700">
+            ESACOM
+          </span>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+
+          <div className="rounded-xl bg-green-50 px-3 py-3">
+            <p className="text-[9px] font-bold uppercase text-green-700">
+              Fijo completado
+            </p>
+            <p className="mt-1 text-xl font-black text-gray-900">
+              {produccionActual?.rgu_fijo_completados || 0}
+              <span className="ml-1 text-[11px] font-semibold text-gray-500">
+                RGU
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-gray-50 px-3 py-3">
+            <p className="text-[9px] font-bold uppercase text-gray-500">
+              Pend. instalación
+            </p>
+            <p className="mt-1 text-xl font-black text-gray-900">
+              {produccionActual?.rgu_fijo_pendiente_instalacion || 0}
+              <span className="ml-1 text-[11px] font-semibold text-gray-500">
+                RGU
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-blue-50 px-3 py-3">
+            <p className="text-[9px] font-bold uppercase text-blue-700">
+              Móvil efectivo
+            </p>
+            <p className="mt-1 text-xl font-black text-gray-900">
+              {produccionActual?.kpi_movil_portadas || 0}
+              <span className="ml-1 text-[11px] font-semibold text-gray-500">
+                portadas
+              </span>
+            </p>
+          </div>
+
+          <div className="rounded-xl bg-orange-50 px-3 py-3">
+            <p className="text-[9px] font-bold uppercase text-orange-700">
+              Móvil por activar
+            </p>
+            <p className="mt-1 text-xl font-black text-gray-900">
+              {produccionActual?.movil_pendiente_activacion || 0}
+            </p>
+          </div>
+
+        </div>
+      </section>
+        </>
+      )}
 
       {error && <p className="mb-4 rounded-lg bg-esacom-red-light px-4 py-3 text-sm text-esacom-red">{error}</p>}
 
@@ -444,7 +993,7 @@ export default function PortalEjecutivo() {
             <div>
               <div className="mb-3">
                 <h2 className="text-base font-extrabold text-gray-900">{perfilKpi === "HONORARIOS" ? "KPI Calidad Honorarios en curso" : "KPI Calidad en curso"}</h2>
-                <p className="text-xs text-gray-500">{perfilKpi === "HONORARIOS" ? "Se muestra el porcentaje real de pago informado por Claro. La meta Honorarios permanece separada y pendiente de definición por Gerencia." : "Solo el mes actualmente medido por Claro permanece abierto. Los meses anteriores quedan congelados en Histórico."}</p>
+                <p className="text-xs text-gray-500">{perfilKpi === "HONORARIOS" ? "Se muestra el porcentaje real de pago informado por Claro. La meta Honorarios permanece separada y pendiente de definición por Gerencia." : "Pueden coexistir varias camadas en AVANCE. Un mes solo pasa a Histórico cuando Claro envía un CIERRE oficial."}</p>
               </div>
               {perfilKpi === "HONORARIOS" && (
                 <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -453,9 +1002,31 @@ export default function PortalEjecutivo() {
                 </div>
               )}
               {mesCalidadPendiente && (
-                <div className="mb-4 rounded-2xl border border-dashed border-blue-200 bg-blue-50/50 px-4 py-3">
-                  <p className="text-xs font-bold text-blue-800">{nombreMes(mesCalidadPendiente)} · aún sin medición de Calidad</p>
-                  <p className="mt-1 text-[11px] text-blue-700/80">La producción del mes ya se muestra arriba, pero el KPI Calidad aparecerá cuando Claro entregue la medición correspondiente.</p>
+                <div className="mb-4 max-w-2xl rounded-2xl border border-l-4 border-blue-200 border-l-blue-500 bg-white p-4 shadow-sm sm:p-5">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-bold uppercase tracking-wide text-gray-500">
+                        {nombreMes(mesCalidadPendiente)}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-400">
+                        Calidad de pago · primera boleta B1
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-blue-50 px-2.5 py-1 text-[10px] font-bold text-blue-700">
+                      MES ACTUAL
+                    </span>
+                  </div>
+
+                  <div className="mt-4 rounded-xl bg-blue-50/60 p-4">
+                    <p className="text-base font-extrabold text-blue-900">
+                      Aún sin medición B1 de Claro
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-blue-800">
+                      Tu producción de {nombreMes(mesCalidadPendiente)} ya está disponible.
+                      El KPI de Calidad aparecerá cuando Claro entregue el primer avance
+                      correspondiente a esta camada.
+                    </p>
+                  </div>
                 </div>
               )}
               <div className="max-w-2xl">{cortes.length ? cortes.map((c) => <KpiCard key={`${c.mes_ano}-${c.boleta}`} corte={c} />) : <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">Aún no existe una medición de Calidad en curso para tu cartera.</div>}</div>
@@ -466,27 +1037,251 @@ export default function PortalEjecutivo() {
 
       {tab === "clientes" && (
         <>
-          <div className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div><p className="text-sm font-bold text-gray-900">Mis clientes · {nombreMes(mesSeleccionado)}</p><p className="text-xs text-gray-500">Mes actual por defecto. “Activos por pago” muestra quienes pagaron la boleta vigente de ese mes{boletaActivaMes ? ` (${NOMBRE_BOLETA[boletaActivaMes]})` : ""}.</p></div>
+          <section className="mb-4 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <p className="text-base font-extrabold text-gray-900">
+                  Mis clientes · {nombreMes(mesSeleccionado)}
+                </p>
+
+                <p className="mt-1 text-xs text-gray-500">
+                  Revisa rápidamente el estado de tus clientes y entra directo a los que requieren seguimiento.
+                </p>
+              </div>
+
               <div className="flex rounded-xl bg-gray-100 p-1">
-                <button type="button" onClick={() => setMesClientes("ACTUAL")} className={`rounded-lg px-3 py-2 text-xs font-semibold ${mesClientes === "ACTUAL" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>Mes actual</button>
-                <button type="button" onClick={() => setMesClientes("ANTERIOR")} className={`rounded-lg px-3 py-2 text-xs font-semibold ${mesClientes === "ANTERIOR" ? "bg-white text-gray-900 shadow-sm" : "text-gray-500"}`}>Mes anterior</button>
+                <button
+                  type="button"
+                  onClick={() => { setMesClientes("ACTUAL"); setFechaVencimientoSeleccionada(null); }}
+                  className={`rounded-lg px-4 py-2 text-xs font-semibold ${
+                    mesClientes === "ACTUAL"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500"
+                  }`}
+                >
+                  Mes actual
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => { setMesClientes("ANTERIOR"); setFechaVencimientoSeleccionada(null); }}
+                  className={`rounded-lg px-4 py-2 text-xs font-semibold ${
+                    mesClientes === "ANTERIOR"
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500"
+                  }`}
+                >
+                  Mes anterior
+                </button>
               </div>
             </div>
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-              {[["ACTIVOS_PAGO", `Activos por pago (${(clientesActivosMes || []).length})`], ["GESTIONABLES", "Gestionables"], ["INSTALADO", "Instalados"], ["PENDIENTE_INSTALACION", "Pend. instalación"], ["PENDIENTE_COMERCIAL", "Pend. comercial"], ["ANULADO", "Anulados"]].map(([valor, label]) => (
-                <button key={valor} type="button" onClick={() => setFiltroClientes(valor)} className={`min-h-10 whitespace-nowrap rounded-full border px-3.5 text-xs font-semibold ${filtroClientes === valor ? "border-esacom-ink bg-esacom-ink text-white ring-2 ring-esacom-lime/20" : "border-gray-200 bg-white text-gray-600"}`}>{label}</button>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
+
+              {[
+                {
+                  key: "TODOS_ACTIVOS",
+                  label: "Todos activos",
+                  count: conteosClientes.TODOS_ACTIVOS,
+                  activo: "border-blue-500 bg-blue-50 text-blue-800 ring-blue-100",
+                },
+                {
+                  key: "INSTALADO",
+                  label: "Instalados",
+                  count: conteosClientes.INSTALADO,
+                  activo: "border-green-500 bg-green-50 text-green-800 ring-green-100",
+                },
+                {
+                  key: "PENDIENTE_INSTALACION",
+                  label: "Pend. instalación",
+                  count: conteosClientes.PENDIENTE_INSTALACION,
+                  activo: "border-orange-500 bg-orange-50 text-orange-800 ring-orange-100",
+                },
+                {
+                  key: "PENDIENTE_COMERCIAL",
+                  label: "Pend. comercial",
+                  count: conteosClientes.PENDIENTE_COMERCIAL,
+                  activo: "border-yellow-500 bg-yellow-50 text-yellow-800 ring-yellow-100",
+                },
+                {
+                  key: "ACTIVOS_PAGO",
+                  label: "Pagaron",
+                  count: conteosClientes.ACTIVOS_PAGO,
+                  activo: "border-emerald-500 bg-emerald-50 text-emerald-800 ring-emerald-100",
+                },
+                {
+                  key: "ANULADO",
+                  label: "Anulados",
+                  count: conteosClientes.ANULADO,
+                  activo: "border-red-500 bg-red-50 text-red-800 ring-red-100",
+                },
+              ].map((item) => {
+                const seleccionado = filtroClientes === item.key;
+
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => { setFiltroClientes(item.key); setFechaVencimientoSeleccionada(null); }}
+                    className={`rounded-xl border p-3 text-left transition ${
+                      seleccionado
+                        ? `${item.activo} ring-2`
+                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
+                    }`}
+                  >
+                    <p className="text-2xl font-black">
+                      {item.count}
+                    </p>
+
+                    <p className="mt-1 text-[10px] font-bold uppercase tracking-wide">
+                      {item.label}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-3 rounded-xl bg-gray-50 px-4 py-3">
+              <p className="text-xs font-semibold text-gray-800">
+                Mostrando {clientesFiltrados.length}{" "}
+                {clientesFiltrados.length === 1 ? "cliente" : "clientes"}
+              </p>
+
+              <p className="mt-0.5 text-[10px] text-gray-400">
+                {filtroClientes === "TODOS_ACTIVOS" &&
+                  "Clientes vigentes del mes, excluyendo anulados."}
+
+                {filtroClientes === "INSTALADO" &&
+                  "Clientes que ya tienen instalación completada."}
+
+                {filtroClientes === "PENDIENTE_INSTALACION" &&
+                  "Clientes que todavía esperan instalación."}
+
+                {filtroClientes === "PENDIENTE_COMERCIAL" &&
+                  "Clientes con gestión comercial pendiente."}
+
+                {filtroClientes === "ACTIVOS_PAGO" &&
+                  `Clientes con pago informado para la boleta vigente${
+                    boletaActivaMes
+                      ? ` (${NOMBRE_BOLETA[boletaActivaMes]})`
+                      : ""
+                  }.`}
+
+                {filtroClientes === "ANULADO" &&
+                  "Clientes anulados del período seleccionado."}
+              </p>
+            </div>
+          </section>
+
+          <div className="mb-4">
+            <MotivosPendienteBarChart
+              items={motivosPendienteComercial}
+              titulo="Pendientes comerciales por motivo"
+              subtitulo={`Casos que debes resolver en ${nombreMes(mesSeleccionado)}.`}
+            />
+          </div>
+
+          <div className="mb-4">
+            {cortesB1 === null ? (
+              <div className="h-40 animate-pulse rounded-2xl bg-gray-100" />
+            ) : errorCortesB1 ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-xs text-red-700">
+                {errorCortesB1}
+              </div>
+            ) : (
+              <VencimientoPrimeraBoletaChart
+                cortes={cortesB1}
+                mesSeleccionado={mesSeleccionado}
+                fechaSeleccionada={fechaVencimientoSeleccionada}
+                onSeleccionarFecha={setFechaVencimientoSeleccionada}
+              />
+            )}
+          </div>
+
+          {fechaVencimientoSeleccionada && !errorCortesB1 && (
+            <section className="mb-5 rounded-2xl border border-blue-200 bg-white p-4 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-extrabold text-gray-900">
+                    Clientes B1 por gestionar
+                  </h3>
+                  <p className="text-xs text-gray-500">
+                    Vencimiento: {fechaVencimientoSeleccionada.split("-").reverse().join("/")}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setFechaVencimientoSeleccionada(null)}
+                  className="rounded-lg border px-3 py-2 text-xs font-bold text-blue-700"
+                >
+                  Quitar filtro
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                {(cortesB1 || [])
+                  .filter((c) =>
+                    c.mes_ano === mesSeleccionado &&
+                    c.boleta === "B1" &&
+                    c.estado_pago === "PENDIENTE" &&
+                    c.venta?.estado_instalacion === "INSTALADO" &&
+                    String(c.fecha_vencimiento || "").slice(0, 10) === fechaVencimientoSeleccionada &&
+                    Number(c.rgu_kpi ?? c.venta?.rgu_base ?? 0) > 0
+                  )
+                  .map((c) => (
+                    <div key={c.id} className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                      <p className="text-xs font-bold text-gray-900">
+                        Pedido: {c.venta?.n_pedido || "Sin número"}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-600">
+                        B1 pendiente · {c.rgu_kpi ?? c.venta?.rgu_base ?? 0} RGU
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setVentaDetalle(c.venta.id)}
+                        className="mt-3 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700"
+                      >
+                        Ver historial y boletas →
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            </section>
+          )}
+
+          {(filtroClientes === "ACTIVOS_PAGO"
+            ? clientesActivosMes
+            : clientesMes) === null ? (
+            <div className="h-64 animate-pulse rounded-2xl bg-gray-100" />
+          ) : clientesFiltrados.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center">
+              <p className="text-sm font-semibold text-gray-500">
+                No hay clientes en esta categoría.
+              </p>
+              <p className="mt-1 text-xs text-gray-400">
+                Prueba otro estado o cambia entre mes actual y mes anterior.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {clientesFiltrados.map((v) => (
+                <ClienteCard
+                  key={v.id}
+                  venta={v}
+                  onDetalle={setVentaDetalle}
+                  activoPago={filtroClientes === "ACTIVOS_PAGO"}
+                  mesSeleccionado={mesSeleccionado}
+                  boletaActivaMes={boletaActivaMes}
+                />
               ))}
             </div>
-          </div>
-          {(filtroClientes === "ACTIVOS_PAGO" ? clientesActivosMes : clientesMes) === null ? <div className="h-64 animate-pulse rounded-2xl bg-gray-100" /> : clientesFiltrados.length === 0 ? <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">No hay clientes que coincidan con este mes, estado o búsqueda.</div> : <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{clientesFiltrados.map((v) => <ClienteCard key={v.id} venta={v} onDetalle={setVentaDetalle} activoPago={filtroClientes === "ACTIVOS_PAGO"} />)}</div>}
+          )}
         </>
       )}
 
       {tab === "historico" && (
         <section>
-          <div className="mb-3"><h2 className="text-base font-extrabold text-gray-900">{perfilKpi === "HONORARIOS" ? "Histórico KPI Calidad Honorarios" : "Histórico KPI Calidad Fijo"}</h2><p className="text-xs text-gray-500">{perfilKpi === "HONORARIOS" ? "Muestra tu porcentaje real de pago por mes, sin aplicar una meta Regular. Los cierres quedan congelados." : "Muestra un resultado por mes. Cuando el mes deja de estar en curso queda congelado y no cambia porque aparezca después como otra boleta en un reporte de Claro."}</p></div>
+          <div className="mb-3"><h2 className="text-base font-extrabold text-gray-900">{perfilKpi === "HONORARIOS" ? "Histórico KPI Calidad Honorarios" : "Histórico KPI Calidad Fijo"}</h2><p className="text-xs text-gray-500">{perfilKpi === "HONORARIOS" ? "Muestra tu porcentaje real de pago por mes, sin aplicar una meta Regular. Los cierres quedan congelados." : "Aquí aparecen únicamente meses con CIERRE oficial recibido de Claro. Los AVANCE permanecen en Mi KPI aunque exista una camada más nueva."}</p></div>
           {historicoKpi.length === 0 ? <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-8 text-center text-sm text-gray-400">Todavía no hay boletas anteriores disponibles para tu cartera.</div> : <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">{historicoKpi.map((c, i) => <HistoricoCard key={`${c.mes_ano}-${c.boleta}-${i}`} corte={c} />)}</div>}
         </section>
       )}

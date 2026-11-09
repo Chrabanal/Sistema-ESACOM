@@ -36,6 +36,19 @@ def _valor(row, mapa, nombre, default=""):
     return default if valor is None else valor
 
 
+def _valor_alias(row, mapa, *nombres, default=""):
+    for nombre in nombres:
+        idx = mapa.get(_cabecera(nombre))
+        if idx is not None and idx < len(row):
+            valor = row[idx]
+            return default if valor is None else valor
+    return default
+
+
+def _tiene_alias(mapa, *nombres):
+    return any(_cabecera(nombre) in mapa for nombre in nombres)
+
+
 def _rgu(valor):
     if valor in (None, ""):
         return 0
@@ -138,16 +151,19 @@ def _fuente_en_vivo():
         fija_filas_control += 1
 
     mmap = _mapa(movil_rows[0])
-    requeridos_movil = ["SUPERVISOR", "NOMBRE EVT", "PPAL/ADICI.", "FECHA ACTIVACIÓN", "ESTADO"]
+    requeridos_movil = ["SUPERVISOR", "PPAL/ADICI.", "FECHA ACTIVACIÓN", "ESTADO"]
     faltantes = [h for h in requeridos_movil if _cabecera(h) not in mmap]
+    if not _tiene_alias(mmap, "NOMBRE EVT", "NOMBRE EJECUTIVO"):
+        faltantes.append("NOMBRE EVT/NOMBRE EJECUTIVO")
     if faltantes:
         raise RuntimeError(f"Faltan columnas en Ventas Móvil: {', '.join(faltantes)}")
 
     movil_filas = movil_efectivas = movil_pendientes = 0
     for row in movil_rows[1:]:
         tipo = _tipo_movil(_valor(row, mmap, "PPAL/ADICI."))
+        evt_fuente = _valor_alias(row, mmap, "NOMBRE EVT", "NOMBRE EJECUTIVO")
         # Filas de plantilla o fórmulas vacías no forman parte del universo móvil.
-        if tipo == "otros" and not any(str(_valor(row, mmap, h) or "").strip() for h in ("SUPERVISOR", "NOMBRE EVT")):
+        if tipo == "otros" and not any(str(x or "").strip() for x in (_valor(row, mmap, "SUPERVISOR"), evt_fuente)):
             continue
         if tipo == "otros":
             # Se conserva como auditable si realmente trae datos.
@@ -156,7 +172,7 @@ def _fuente_en_vivo():
         estado = _valor(row, mmap, "ESTADO")
         fecha_activacion = _valor(row, mmap, "FECHA ACTIVACIÓN")
         sup = str(_valor(row, mmap, "SUPERVISOR") or "SIN SUPERVISOR").strip()
-        evt = str(_valor(row, mmap, "NOMBRE EVT") or "SIN EJECUTIVO").strip()
+        evt = str(evt_fuente or "SIN EJECUTIVO").strip()
         if not _movil_efectiva(estado, fecha_activacion):
             movil_pendientes += 1
             for b in (global_, por_sup[sup], por_sup_evt[sup][evt]):

@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import logging
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 from django.db import models
@@ -22,6 +22,7 @@ from .emails import enviar_apelacion_por_correo
 from .models import Apelacion, Corte, Gestion, Venta
 from usuarios.models import Ejecutivo
 from integraciones.services.metas_kpi import meta_calidad_para, metas_calidad_para_focos, serializar_meta
+from integraciones.report_dates import fecha_reporte_desde_nombre
 from .serializers import ApelacionSerializer, CorteSerializer, GestionSerializer, VentaSerializer
 from .services import (
     resumen_accionables,
@@ -55,11 +56,11 @@ def _restar_meses(fecha, cantidad):
 
 
 def _scope_ventas_qs(qs, user):
-    """Alcance comercial según la fuente maestra ESACOM.
+    """Alcance comercial segÃºn la fuente maestra ESACOM.
 
     La venta pertenece al vendedor identificado por RUT EVT de ESACOM.
     CODIGO ANDES, CODIGO CE y PROPIETARIO_FINAL de Claro quedan solo como
-    datos de apoyo/auditoría y nunca cambian el dueño de la venta.
+    datos de apoyo/auditorÃ­a y nunca cambian el dueÃ±o de la venta.
     """
     if user.tiene_alcance_global:
         return qs
@@ -70,17 +71,17 @@ def _scope_ventas_qs(qs, user):
 
 
 def _scope_cortes_qs(qs, user):
-    """KPI operativo basado exclusivamente en ventas válidas de ESACOM.
+    """KPI operativo basado exclusivamente en ventas vÃ¡lidas de ESACOM.
 
-    El dueño se resuelve por RUT EVT (``Venta.ejecutivo``). Una venta ANULADA
-    puede seguir existiendo en los archivos históricos de Claro para auditoría,
+    El dueÃ±o se resuelve por RUT EVT (``Venta.ejecutivo``). Una venta ANULADA
+    puede seguir existiendo en los archivos histÃ³ricos de Claro para auditorÃ­a,
     pero no forma parte del KPI/cartera operativa del vendedor.
     """
     qs = filtrar_cortes_kpi_operativos(qs)
     if user.tiene_alcance_global:
         # Gerencia conserva el total KPI global aunque exista un pedido cuya
-        # propiedad individual esté en conflicto en ESACOM. Ese pedido se
-        # muestra como ambigüedad de atribución, no se borra del total Claro.
+        # propiedad individual estÃ© en conflicto en ESACOM. Ese pedido se
+        # muestra como ambigÃ¼edad de atribuciÃ³n, no se borra del total Claro.
         return qs
 
     # Un pedido ESACOM con dos propietarios incompatibles nunca se adjudica
@@ -94,9 +95,9 @@ def _scope_cortes_qs(qs, user):
 
 class VentaPagination(PageNumberPagination):
     """
-    Igual que la paginación por defecto (50), pero permite pedir más
+    Igual que la paginaciÃ³n por defecto (50), pero permite pedir mÃ¡s
     con ?page_size=... -- lo usa la pantalla 'Base de Datos' para traer
-    todo de una vez al exportar a CSV, sin recorrer página por página.
+    todo de una vez al exportar a CSV, sin recorrer pÃ¡gina por pÃ¡gina.
     """
 
     page_size = 50
@@ -111,7 +112,12 @@ class VentaViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     Ejecutivo: solo las propias (de solo lectura).
     """
 
-    queryset = Venta.objects.select_related("ejecutivo", "ejecutivo_ce", "promocion", "comuna").all()
+    queryset = (
+        Venta.objects
+        .select_related("ejecutivo", "ejecutivo_ce", "promocion", "comuna")
+        .prefetch_related("cortes")
+        .all()
+    )
     serializer_class = VentaSerializer
     permission_classes = [EsSupervisorOModifica]
     pagination_class = VentaPagination
@@ -119,7 +125,7 @@ class VentaViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     supervisor_lookup = "ejecutivo__supervisor"
     filterset_fields = ["camada", "estado_instalacion", "tipo_cliente", "origen_venta", "ejecutivo", "comuna", "promocion"]
     filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
-    # Pantalla 'Base de Datos' (consulta centralizada, como pidió Gerencia):
+    # Pantalla 'Base de Datos' (consulta centralizada, como pidiÃ³ Gerencia):
     # buscar por cliente, pedido o ejecutivo sin tener que saber el filtro exacto.
     search_fields = ["rut_cliente", "n_pedido", "nombre_cliente", "nombre_evt", "rut_evt", "rut_ce", "codigo_ce"]
     ordering_fields = ["fecha_venta", "precio_venta", "camada", "rut_cliente"]
@@ -189,10 +195,10 @@ class CorteViewSet(RoleScopedMixin, viewsets.ModelViewSet):
         """
         POST /api/cortes/{id}/verificar/  { "estado_pago": "PAGADO" }
 
-        Lo usa Cobranza después de comparar la base de Claro contra la
+        Lo usa Cobranza despuÃ©s de comparar la base de Claro contra la
         de ESACOM y confirmar el estado real en el portal de pago o la
-        app Andes -- deja registrado quién lo verificó y cuándo, y
-        protege ese estado para que el próximo import del KPI de Claro
+        app Andes -- deja registrado quiÃ©n lo verificÃ³ y cuÃ¡ndo, y
+        protege ese estado para que el prÃ³ximo import del KPI de Claro
         no lo pise (ver integraciones/management/commands/importar_kpi.py).
         """
         if not request.user.tiene_permiso("cobranza"):
@@ -221,9 +227,9 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     permission_classes = [EsSupervisorOModifica]
 
     def get_permissions(self):
-        # Principio de mínimo privilegio:
-        # - lectura/detección/exclusión: Supervisor o Gerencia, siempre scoped.
-        # - envío externo a Claro: solo Gerencia/superusuario.
+        # Principio de mÃ­nimo privilegio:
+        # - lectura/detecciÃ³n/exclusiÃ³n: Supervisor o Gerencia, siempre scoped.
+        # - envÃ­o externo a Claro: solo Gerencia/superusuario.
         # - no existe CRUD libre desde la API para fabricar/editar/borrar
         #   apelaciones fuera del motor de negocio.
         if self.action == "enviar":
@@ -231,13 +237,13 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
         return [PuedeApelaciones()]
 
     def create(self, request, *args, **kwargs):
-        return Response({"detail": "Las apelaciones se crean mediante detección automática."}, status=405)
+        return Response({"detail": "Las apelaciones se crean mediante detecciÃ³n automÃ¡tica."}, status=405)
 
     def update(self, request, *args, **kwargs):
-        return Response({"detail": "Edición directa de apelaciones no permitida."}, status=405)
+        return Response({"detail": "EdiciÃ³n directa de apelaciones no permitida."}, status=405)
 
     def partial_update(self, request, *args, **kwargs):
-        return Response({"detail": "Edición directa de apelaciones no permitida."}, status=405)
+        return Response({"detail": "EdiciÃ³n directa de apelaciones no permitida."}, status=405)
 
     def destroy(self, request, *args, **kwargs):
         return Response({"detail": "Las apelaciones no se eliminan; se excluyen para preservar trazabilidad."}, status=405)
@@ -255,9 +261,9 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     @action(detail=False, methods=["post"])
     def detectar(self, request):
         """
-        Corre el motor de detección sobre los Corte visibles para este
+        Corre el motor de detecciÃ³n sobre los Corte visibles para este
         usuario (mismo alcance por rol que el resto del ViewSet) --
-        botón 'Detección automática' de los mockups.
+        botÃ³n 'DetecciÃ³n automÃ¡tica' de los mockups.
         """
         # Reutilizamos el mismo alcance centralizado que el resto de la API:
         # Operaciones/Gerencia ven global; Supervisor su equipo; Ejecutivo lo propio.
@@ -272,7 +278,7 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def excluir(self, request, pk=None):
-        """Exclusión manual -- 'Permite descartar casos puntuales que no correspondan'."""
+        """ExclusiÃ³n manual -- 'Permite descartar casos puntuales que no correspondan'."""
         apelacion = self.get_object()
         apelacion.estado = Apelacion.Estado.EXCLUIDA
         apelacion.excluida_por = request.user
@@ -283,10 +289,10 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def enviar(self, request, pk=None):
         """
-        Envía la apelación por correo a Claro (con el Excel adjunto) y
-        marca el estado. La tarea automática de Celery (Día 11) llama
-        a la misma función `enviar_apelacion_por_correo`, así que el
-        botón manual y el envío automático nunca pueden desalinearse.
+        EnvÃ­a la apelaciÃ³n por correo a Claro (con el Excel adjunto) y
+        marca el estado. La tarea automÃ¡tica de Celery (DÃ­a 11) llama
+        a la misma funciÃ³n `enviar_apelacion_por_correo`, asÃ­ que el
+        botÃ³n manual y el envÃ­o automÃ¡tico nunca pueden desalinearse.
         """
         apelacion = self.get_object()
         try:
@@ -302,7 +308,7 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"])
     def exportar(self, request):
-        """Exporta las apelaciones visibles a Excel para revisión/radicación."""
+        """Exporta las apelaciones visibles a Excel para revisiÃ³n/radicaciÃ³n."""
         import openpyxl
         from openpyxl.styles import Font
 
@@ -341,7 +347,7 @@ class ApelacionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
 class GestionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     """
     Registro de llamadas/WhatsApp del Portal Ejecutivo. Un Ejecutivo
-    crea sus propias gestiones, únicamente sobre ventas de su propia
+    crea sus propias gestiones, Ãºnicamente sobre ventas de su propia
     cartera; Supervisor y Gerencia las ven (no las crean) para
     trazabilidad del equipo.
     """
@@ -355,8 +361,8 @@ class GestionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
     def get_permissions(self):
         if self.request.method not in ("GET", "HEAD", "OPTIONS"):
             # Solo un Ejecutivo raso registra gestiones -- Supervisor y
-            # Gerencia solo consultan, para no mezclar "quién gestionó"
-            # con "quién supervisa".
+            # Gerencia solo consultan, para no mezclar "quiÃ©n gestionÃ³"
+            # con "quiÃ©n supervisa".
             return [EsEjecutivo()]
         return [IsAuthenticated()]
 
@@ -364,17 +370,17 @@ class GestionViewSet(RoleScopedMixin, viewsets.ModelViewSet):
         venta = serializer.validated_data["venta"]
         propietario_id = venta.ejecutivo_id
         if propietario_id != self.request.user.id:
-            raise PermissionDenied("No puedes registrar una gestión sobre un cliente que no pertenece a tu cartera.")
+            raise PermissionDenied("No puedes registrar una gestiÃ³n sobre un cliente que no pertenece a tu cartera.")
         serializer.save(ejecutivo=self.request.user)
 
 
 def _cortes_visibles(user, carga_kpi=None):
     """Alcance KPI derivado de la venta ESACOM y del snapshot activo.
 
-    ``Corte`` conserva el último estado conocido por venta/camada/boleta. Una
+    ``Corte`` conserva el Ãºltimo estado conocido por venta/camada/boleta. Una
     fila puede desaparecer de un snapshot posterior de Claro; por eso el
     dashboard vigente debe filtrar por ``carga_kpi`` y nunca mezclar cortes
-    residuales de cargas antiguas. El dueño comercial sigue viniendo de
+    residuales de cargas antiguas. El dueÃ±o comercial sigue viniendo de
     ``Venta.ejecutivo`` (RUT EVT ESACOM).
     """
     cortes = Corte.objects.select_related(
@@ -387,15 +393,16 @@ def _cortes_visibles(user, carga_kpi=None):
 
 
 def _ultima_carga_kpi_activa():
-    """Último reporte de AVANCE; un CIERRE histórico no desplaza la ventana activa."""
+    """Ãšltimo AVANCE Fijo por fecha del reporte Claro, no por momento de carga CRM."""
     from integraciones.models import CargaExcel
 
     qs = CargaExcel.objects.filter(
         tipo_base=CargaExcel.TipoBase.REPORTE_KPI
     ).exclude(
         formato_kpi__in=[CargaExcel.FormatoKPI.AVANCE_MOVIL, CargaExcel.FormatoKPI.CIERRE_MOVIL]
-    ).order_by("-fecha_corte", "-creado_en", "-id")
-    return qs.filter(estado_reporte=CargaExcel.EstadoReporte.AVANCE).first() or qs.first()
+    )
+    avance = _mas_reciente(qs.filter(estado_reporte=CargaExcel.EstadoReporte.AVANCE))
+    return avance or _mas_reciente(qs)
 
 
 def _focos_carga(carga) -> dict[str, str]:
@@ -456,13 +463,16 @@ def _mes_anterior(mes: str) -> str:
 
 
 def _scope_registros_kpi_qs(qs, user):
-    """Aplica al snapshot inmutable el mismo alcance comercial del KPI operativo.
+    """Aplica el alcance usando el snapshot ESACOM sin recorrer filas en Python.
 
-    Regular y Honorarios comparten la propiedad ESACOM y el cruce por pedido,
-    pero nunca se mezclan para metas/promedios. Un Ejecutivo Honorarios recibe
-    exclusivamente sus propios registros Honorarios; Supervisor/Gerencia siguen
-    usando REGULAR en el consolidado principal y consumen Honorarios por una
-    salida separada.
+    R2.17.1: el primer R2.17 filtraba cada queryset registro por registro, lo
+    que obligaba a materializar miles de KPIRegistro y sus relaciones varias
+    veces por request de Gerencia/Supervisor. Con ~80 mil snapshots SQLite
+    podÃ­a tardar decenas de segundos.
+
+    La ruta normal ahora filtra directamente en SQL sobre ``snapshot_esacom``.
+    Solo si existen filas legacy sin snapshot se materializa ese subconjunto
+    pequeÃ±o con la lÃ³gica anterior.
     """
     perfil = Ejecutivo.TipoKPI.REGULAR
     if (
@@ -473,43 +483,207 @@ def _scope_registros_kpi_qs(qs, user):
     ):
         perfil = Ejecutivo.TipoKPI.HONORARIOS
 
-    qs = qs.filter(
+    if not hasattr(qs, "filter"):
+        return qs
+
+    snapshot_qs = qs.filter(
+        cruce_ok=True,
+        snapshot_esacom__isnull=False,
+        snapshot_esacom__estado_instalacion=Venta.EstadoInstalacion.INSTALADO,
+        snapshot_esacom__tipo_kpi=perfil,
+        snapshot_esacom__cargo=Ejecutivo.Cargo.EJECUTIVO,
+        snapshot_esacom__ejecutivo_activo=True,
+    )
+
+    if not user.tiene_alcance_global:
+        snapshot_qs = snapshot_qs.filter(snapshot_esacom__conflicto_fuente=False)
+        if user.es_supervisor:
+            snapshot_qs = snapshot_qs.filter(snapshot_esacom__supervisor_id=user.id)
+        else:
+            snapshot_qs = snapshot_qs.filter(snapshot_esacom__ejecutivo_id=user.id)
+
+    # Fast path: despuÃ©s de sembrar R2.17 todas las filas usan snapshot y el
+    # caller recibe un QuerySet todavÃ­a perezoso, ya reducido por SQLite.
+    legacy_qs = qs.filter(snapshot_esacom__isnull=True)
+    if not legacy_qs.exists():
+        return snapshot_qs
+
+    # Compatibilidad Ãºnicamente para cargas antiguas aÃºn no sembradas.
+    legacy_qs = legacy_qs.filter(
         cruce_ok=True,
         venta__estado_instalacion=Venta.EstadoInstalacion.INSTALADO,
         venta__ejecutivo__tipo_kpi=perfil,
         venta__ejecutivo__cargo=Ejecutivo.Cargo.EJECUTIVO,
         venta__ejecutivo__is_active=True,
     )
-    if user.tiene_alcance_global:
-        return qs
-    qs = qs.exclude(venta__conflicto_fuente=True)
-    if user.es_supervisor:
-        return qs.filter(venta__ejecutivo__supervisor=user, venta__ejecutivo__is_active=True).distinct()
-    return qs.filter(venta__ejecutivo=user).distinct()
+    if not user.tiene_alcance_global:
+        legacy_qs = legacy_qs.filter(venta__conflicto_fuente=False)
+        if user.es_supervisor:
+            legacy_qs = legacy_qs.filter(venta__ejecutivo__supervisor_id=user.id)
+        else:
+            legacy_qs = legacy_qs.filter(venta__ejecutivo_id=user.id)
+
+    return list(snapshot_qs) + list(legacy_qs.select_related("venta", "venta__promocion"))
+
+
+def _resumen_cierre_fijo_snapshot_usuario(user, carga, camada: str, boleta: str):
+    """Resume el CIERRE_FIJO desde su poblaciÃ³n congelada, nunca desde Venta actual."""
+    from integraciones.models import KPICierreFijoFila
+
+    qs = KPICierreFijoFila.objects.filter(carga=carga, camada=camada, boleta=boleta)
+    if not user.tiene_alcance_global:
+        if user.es_supervisor:
+            qs = qs.filter(supervisor_fuente__iexact=user.nombre)
+        else:
+            rut = str(getattr(user, "rut", "") or "").replace(".", "").strip().upper()
+            qs = qs.filter(rut_evt__iexact=rut)
+    # Portal Regular nunca mezcla Honorarios.
+    qs = qs.filter(models.Q(tipo_kpi=Ejecutivo.TipoKPI.REGULAR) | models.Q(tipo_kpi=""))
+    filas = list(qs)
+    if not filas:
+        return None
+
+    categorias = {
+        "PAGO": "pagadas",
+        "PENDIENTE": "pendientes",
+        "NO_PAGO": "no_pago",
+        "FUERA_PLAZO": "fuera_plazo",
+        "SIN_BOLETA": "sin_boleta",
+        "N_D": "fuera_medicion",
+    }
+    datos = {"pagadas": 0, "pendientes": 0, "no_pago": 0, "fuera_plazo": 0, "sin_boleta": 0, "fuera_medicion": 0}
+    for fila in filas:
+        bucket = categorias.get(fila.categoria, "fuera_medicion")
+        datos[bucket] += int(fila.rgu or 0)
+
+    total = datos["pagadas"] + datos["pendientes"] + datos["no_pago"] + datos["fuera_plazo"]
+    meta = meta_calidad_para(boleta=boleta, camada=camada, fallback=getattr(carga, f"meta_{boleta.lower()}", None))
+    meta_pct = Decimal(str(serializar_meta(meta) or 0))
+    pct_exacto = (Decimal(datos["pagadas"]) / Decimal(total) * 100) if total else Decimal("0")
+    pct = float(pct_exacto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+    if total and meta_pct:
+        objetivo = (Decimal(total) * meta_pct / Decimal("100")).to_integral_value(rounding=ROUND_CEILING)
+        faltan = max(0, int(objetivo) - datos["pagadas"])
+    else:
+        faltan = 0
+    return {
+        **datos,
+        "total": total,
+        "total_con_sin_boleta": total + datos["sin_boleta"],
+        "unidad": "RGU",
+        "meta_pct": float(meta_pct),
+        "pct_cumplimiento": pct,
+        "pct_proyectado": pct,
+        "cumplimiento_meta_pct": float((pct_exacto / meta_pct * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) if meta_pct else 0.0,
+        "faltan_para_meta": faltan,
+        "gestion": {"pago": datos["pagadas"], "vencido_mas_8": 0, "vencido_0_8": 0, "gestionar_0_7": 0, "gestionar_8_mas": 0, "otros": 0},
+        "semaforo": "verde" if meta_pct and pct_exacto >= meta_pct else ("amarillo" if meta_pct and pct_exacto >= meta_pct - 10 else "rojo"),
+        "boleta": boleta,
+        "mes_ano": camada,
+        "tiene_datos": bool(total or datos["sin_boleta"] or datos["fuera_medicion"]),
+        "snapshot_id": carga.id,
+        "fecha_reporte": (fecha_reporte_desde_nombre(carga.archivo_nombre).isoformat() if fecha_reporte_desde_nombre(carga.archivo_nombre) else None),
+        "fecha_corte": carga.fecha_corte.isoformat() if carga.fecha_corte else None,
+        "dia_reporte": carga.dia_reporte,
+        "estado_medicion": carga.estado_reporte,
+        "cerrado": True,
+        "fuente_formato": getattr(carga, "formato_kpi", "CIERRE_FIJO"),
+        "perfil_kpi": "REGULAR",
+        "meta_definida": bool(meta_pct),
+        "valor_informado_claro": _valor_informado_claro_par(carga, boleta, camada),
+        "meta_reporte_claro": float(getattr(carga, f"meta_{boleta.lower()}") or 0) if getattr(carga, f"meta_{boleta.lower()}") is not None else None,
+        "kpi_anterior_pct": None,
+        "tendencia_pp": None,
+        "reporte_anterior": None,
+    }
+
+def _clave_temporal_carga(carga):
+    """Prioridad temporal: fecha reporte Claro > fecha corte > carga CRM."""
+    import datetime
+
+    fecha_reporte = fecha_reporte_desde_nombre(getattr(carga, "archivo_nombre", ""))
+    fecha_corte = getattr(carga, "fecha_corte", None)
+    creado = getattr(carga, "creado_en", None)
+    if creado is not None:
+        creado_clave = creado.timestamp()
+    else:
+        creado_clave = 0
+    return (
+        fecha_reporte or fecha_corte or datetime.date.min,
+        fecha_corte or datetime.date.min,
+        creado_clave,
+        int(getattr(carga, "id", 0) or 0),
+    )
+
+
+def _mas_reciente(qs):
+    cargas = list(qs)
+    return max(cargas, key=_clave_temporal_carga) if cargas else None
+
+
+def _mas_antigua(qs):
+    cargas = list(qs)
+    return min(cargas, key=_clave_temporal_carga) if cargas else None
 
 
 def _cargas_kpi_para_par(boleta: str, camada: str):
-    """Snapshots que midieron exactamente una camada/boleta, del más nuevo al más antiguo."""
-    from integraciones.models import CargaExcel
+    """Snapshots Fijo que contienen una camada/boleta sin JOIN DISTINCT masivo.
+
+    R2.17.2: primero identifica los ``carga_id`` presentes en KPIRegistro y
+    luego filtra CargaExcel por PK. Evita repetir el JOIN + DISTINCT sobre las
+    ~80 mil filas KPI cada vez que Gerencia resuelve una camada.
+    """
+    from django.db.models import Subquery
+    from integraciones.models import CargaExcel, KPIRegistro
 
     campo = {"B1": "foco_b1", "B2": "foco_b2", "B3": "foco_b3"}.get(boleta)
     if not campo or not camada:
         return CargaExcel.objects.none()
+
+    ids_con_par = KPIRegistro.objects.filter(
+        camada=camada, boleta=boleta
+    ).values("carga_id")
     return CargaExcel.objects.filter(
         tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
-        **{campo: camada},
     ).exclude(
         formato_kpi__in=[CargaExcel.FormatoKPI.AVANCE_MOVIL, CargaExcel.FormatoKPI.CIERRE_MOVIL]
-    ).order_by("-fecha_corte", "-creado_en", "-id")
+    ).filter(
+        models.Q(**{campo: camada}) | models.Q(id__in=Subquery(ids_con_par))
+    )
 
 
 def _carga_efectiva_par(boleta: str, camada: str):
-    """Un cierre congela el par; sin cierre se usa el último avance disponible."""
+    """CIERRE_FIJO oficial congela; sin cierre usa el AVANCE Fijo mÃ¡s reciente."""
     from integraciones.models import CargaExcel
 
     qs = _cargas_kpi_para_par(boleta, camada)
-    cierre = qs.filter(estado_reporte=CargaExcel.EstadoReporte.CIERRE).first()
-    return cierre or qs.first()
+    cierre = _mas_antigua(qs.filter(
+        estado_reporte=CargaExcel.EstadoReporte.CIERRE,
+        formato_kpi=CargaExcel.FormatoKPI.CIERRE_FIJO,
+    ))
+    if cierre:
+        return cierre
+    return _mas_reciente(qs.filter(
+        estado_reporte=CargaExcel.EstadoReporte.AVANCE,
+        formato_kpi=CargaExcel.FormatoKPI.DETALLADO,
+    ))
+
+
+def _valor_informado_claro_par(carga, boleta: str, camada: str):
+    """La referencia del correo solo aplica al foco exacto CAMADA+BOLETA.
+
+    Evita mostrar en Septiembre el 97,81% que el RESUMEN informÃ³ para Agosto.
+    """
+    if not carga or not camada:
+        return None
+    campo_foco = {"B1": "foco_b1", "B2": "foco_b2", "B3": "foco_b3"}.get(boleta)
+    campo_valor = {"B1": "avance_b1", "B2": "avance_b2", "B3": "avance_b3"}.get(boleta)
+    if not campo_foco or not campo_valor:
+        return None
+    if str(getattr(carga, campo_foco, "") or "").strip() != camada:
+        return None
+    valor = getattr(carga, campo_valor, None)
+    return float(valor) if valor is not None else None
 
 
 def _resumen_par_snapshot_usuario(user, boleta: str, camada: str, carga=None) -> dict | None:
@@ -554,8 +728,8 @@ def _resumen_par_snapshot_usuario(user, boleta: str, camada: str, carga=None) ->
         total = int(datos.get("total") or 0)
         pct_exacto = (Decimal(pagadas) / Decimal(total) * 100) if total else Decimal("0")
         pct = float(pct_exacto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
-        # Móvil usa su propia meta informada en el reporte (ej. 87/84/78).
-        # Nunca reutiliza automáticamente las metas Fijo 85/83/78.
+        # MÃ³vil usa su propia meta informada en el reporte (ej. 87/84/78).
+        # Nunca reutiliza automÃ¡ticamente las metas Fijo 85/83/78.
         meta_reporte = getattr(carga, f"meta_{boleta.lower()}")
         meta = Decimal(str(meta_reporte or 0))
         cumplimiento = float((pct_exacto / meta * 100).quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)) if meta else 0.0
@@ -584,11 +758,12 @@ def _resumen_par_snapshot_usuario(user, boleta: str, camada: str, carga=None) ->
             },
             "semaforo": semaforo, "boleta": boleta, "mes_ano": camada,
             "tiene_datos": bool(total or sin_boleta), "snapshot_id": carga.id,
+            "fecha_reporte": (fecha_reporte_desde_nombre(carga.archivo_nombre).isoformat() if fecha_reporte_desde_nombre(carga.archivo_nombre) else None),
             "fecha_corte": carga.fecha_corte.isoformat() if carga.fecha_corte else None,
             "dia_reporte": carga.dia_reporte, "estado_medicion": carga.estado_reporte,
             "cerrado": (carga.estado_reporte == CargaExcel.EstadoReporte.CIERRE),
             "fuente_formato": formato_carga,
-            "valor_informado_claro": float(getattr(carga, f"avance_{boleta.lower()}") or 0) if getattr(carga, f"avance_{boleta.lower()}") is not None else None,
+            "valor_informado_claro": _valor_informado_claro_par(carga, boleta, camada),
             "meta_reporte_claro": float(meta_reporte) if meta_reporte is not None else None,
             "kpi_anterior_pct": None, "tendencia_pp": None, "reporte_anterior": None,
         }
@@ -613,6 +788,7 @@ def _resumen_par_snapshot_usuario(user, boleta: str, camada: str, carga=None) ->
         "mes_ano": camada,
         "tiene_datos": bool(resumen.get("total") or resumen.get("sin_boleta") or resumen.get("fuera_medicion")),
         "snapshot_id": carga.id,
+        "fecha_reporte": (fecha_reporte_desde_nombre(carga.archivo_nombre).isoformat() if fecha_reporte_desde_nombre(carga.archivo_nombre) else None),
         "fecha_corte": carga.fecha_corte.isoformat() if carga.fecha_corte else None,
         "dia_reporte": carga.dia_reporte,
         "estado_medicion": carga.estado_reporte or CargaExcel.EstadoReporte.AVANCE,
@@ -620,13 +796,17 @@ def _resumen_par_snapshot_usuario(user, boleta: str, camada: str, carga=None) ->
         "fuente_formato": getattr(carga, "formato_kpi", CargaExcel.FormatoKPI.DETALLADO),
         "perfil_kpi": "HONORARIOS" if es_honorarios else "REGULAR",
         "meta_definida": False if es_honorarios else bool(meta),
-        "valor_informado_claro": float(getattr(carga, f"avance_{boleta.lower()}") or 0) if getattr(carga, f"avance_{boleta.lower()}") is not None else None,
+        "valor_informado_claro": _valor_informado_claro_par(carga, boleta, camada),
         "meta_reporte_claro": float(getattr(carga, f"meta_{boleta.lower()}") or 0) if getattr(carga, f"meta_{boleta.lower()}") is not None else None,
     })
 
     # Tendencia del KPI individual respecto del snapshot inmediatamente anterior
     # del mismo par. No se usa el porcentaje global del correo para medir al vendedor.
-    anterior = _cargas_kpi_para_par(boleta, camada).filter(creado_en__lt=carga.creado_en).first()
+    candidatos_anteriores = [
+        c for c in _cargas_kpi_para_par(boleta, camada)
+        if c.id != carga.id and _clave_temporal_carga(c) < _clave_temporal_carga(carga)
+    ]
+    anterior = max(candidatos_anteriores, key=_clave_temporal_carga) if candidatos_anteriores else None
     if anterior:
         regs_ant = _scope_registros_kpi_qs(
             KPIRegistro.objects.filter(carga=anterior, camada=camada, boleta=boleta), user
@@ -664,67 +844,140 @@ def _boleta_en_carga_para_mes(carga, camada: str) -> str | None:
 
 
 def _cierre_oficial_mes(camada: str):
-    """Primer cierre oficial recibido para el mes; una vez cerrado no se reabre."""
+    """Primer CIERRE_FIJO oficial recibido para el mes; nunca se inventa cierre."""
     from integraciones.models import CargaExcel
 
     if not camada:
         return None
-    return CargaExcel.objects.filter(
+    qs = CargaExcel.objects.filter(
         tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
         estado_reporte=CargaExcel.EstadoReporte.CIERRE,
-    ).exclude(
-        formato_kpi__in=[CargaExcel.FormatoKPI.AVANCE_MOVIL, CargaExcel.FormatoKPI.CIERRE_MOVIL]
+        formato_kpi=CargaExcel.FormatoKPI.CIERRE_FIJO,
     ).filter(
         models.Q(foco_b1=camada) | models.Q(foco_b2=camada) | models.Q(foco_b3=camada)
-    ).order_by("fecha_corte", "creado_en", "id").first()
+        | models.Q(registros_kpi__camada=camada)
+    ).distinct()
+    return _mas_antigua(qs)
 
 
 def _ultimo_avance_b1_mes(camada: str):
-    """Ultimo avance B1 del mes: referencia mensual antes de pasar a otra boleta."""
+    """Ãšltimo AVANCE Fijo que contiene B1 de la camada, aunque no sea foco_b1."""
     from integraciones.models import CargaExcel
 
     if not camada:
         return None
-    return CargaExcel.objects.filter(
+    return _mas_reciente(
+        _cargas_kpi_para_par("B1", camada).filter(
+            estado_reporte=CargaExcel.EstadoReporte.AVANCE,
+            formato_kpi=CargaExcel.FormatoKPI.DETALLADO,
+        )
+    )
+
+
+def _camadas_b1_abiertas() -> list[str]:
+    """Camadas B1 con AVANCE real y sin CIERRE_FIJO oficial.
+
+    R2.17.2 evita recorrer todo KPIRegistro unido a CargaExcel y evita llamar
+    ``_ultimo_avance_b1_mes``/``_cierre_oficial_mes`` una vez por candidato.
+    Primero obtiene los IDs de cargas AVANCE/CIERRE (tablas pequeÃ±as) y luego
+    resuelve las camadas con consultas indexables por ``carga_id``.
+    """
+    from integraciones.models import CargaExcel, KPIRegistro
+
+    avances = CargaExcel.objects.filter(
         tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
         estado_reporte=CargaExcel.EstadoReporte.AVANCE,
         formato_kpi=CargaExcel.FormatoKPI.DETALLADO,
-        foco_b1=camada,
-    ).order_by("-fecha_corte", "-creado_en", "-id").first()
+    )
+    avance_ids = list(avances.values_list("id", flat=True))
+
+    candidatos = set()
+    if avance_ids:
+        candidatos.update(
+            KPIRegistro.objects.filter(carga_id__in=avance_ids, boleta="B1")
+            .filter(
+                models.Q(marca_mes_kpi=1)
+                | models.Q(marca_mes_kpi__isnull=True, es_medible=True)
+            )
+            .exclude(camada="")
+            .values_list("camada", flat=True)
+            .distinct()
+        )
+    candidatos.update(
+        avances.exclude(foco_b1="").values_list("foco_b1", flat=True).distinct()
+    )
+    candidatos.discard("")
+    if not candidatos:
+        return []
+
+    cierres = CargaExcel.objects.filter(
+        tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
+        estado_reporte=CargaExcel.EstadoReporte.CIERRE,
+        formato_kpi=CargaExcel.FormatoKPI.CIERRE_FIJO,
+    )
+    cierre_ids = list(cierres.values_list("id", flat=True))
+    cerradas = set()
+    if cierre_ids:
+        cerradas.update(
+            KPIRegistro.objects.filter(carga_id__in=cierre_ids, camada__in=candidatos)
+            .exclude(camada="")
+            .values_list("camada", flat=True)
+            .distinct()
+        )
+    for campo in ("foco_b1", "foco_b2", "foco_b3"):
+        cerradas.update(
+            cierres.filter(**{f"{campo}__in": candidatos})
+            .exclude(**{campo: ""})
+            .values_list(campo, flat=True)
+        )
+
+    return sorted(candidatos - cerradas, reverse=True)
 
 
 def _resumen_mes_kpi_usuario(user, camada: str, *, en_curso: bool = False) -> dict | None:
-    """Resuelve un unico KPI visible por mes.
+    """Una tarjeta mensual usa B1 mientras estÃ¡ abierta y CIERRE oficial al cerrar.
 
-    El mes B1 vigente permanece EN CURSO. Cuando deja de ser el B1 vigente,
-    el mes queda cerrado y no se reemplaza por B2/B3 posteriores. Si existe
-    un CIERRE oficial se usa el primer cierre recibido; en caso contrario se
-    conserva el ultimo B1 conocido como cierre operativo mensual.
+    R2.14 elimina el cierre operativo inventado. Que una camada deje de ser
+    ``foco_b1`` no la congela: puede coexistir con otra camada B1 abierta.
     """
     if not camada:
         return None
 
+    cierre = _cierre_oficial_mes(camada)
     if en_curso:
+        if cierre is not None:
+            return None
         carga = _ultimo_avance_b1_mes(camada)
         boleta = "B1"
         cierre_oficial = False
         if not carga:
             return None
     else:
-        carga = _cierre_oficial_mes(camada)
+        carga = cierre
         cierre_oficial = bool(carga)
-        boleta = _boleta_en_carga_para_mes(carga, camada) if carga else None
         if not carga:
-            carga = _ultimo_avance_b1_mes(camada)
-            boleta = "B1" if carga else None
-        if not carga or not boleta:
+            return None
+        boleta = _boleta_en_carga_para_mes(carga, camada)
+        if not boleta:
+            # Si el RESUMEN cambiÃ³ de estructura, intenta detectar el par real
+            # importado en BASE sin convertir un AVANCE en cierre.
+            for candidato in ("B1", "B2", "B3"):
+                if _cargas_kpi_para_par(candidato, camada).filter(id=carga.id).exists():
+                    boleta = candidato
+                    break
+        if not boleta:
             return None
 
-    resumen = _resumen_par_snapshot_usuario(user, boleta, camada, carga=carga)
-    # Un cierre agregado puede no contener detalle para un Ejecutivo concreto.
-    # El mes sigue cerrado, pero para no dejarlo sin referencia individual se
-    # conserva su ultimo B1 conocido en vez de tomar un B2/B3 posterior.
-    if (not resumen or not resumen.get("tiene_datos")) and cierre_oficial and not en_curso:
+    if cierre_oficial:
+        # Un CIERRE_FIJO se lee desde KPICierreFijoFila, que conserva la
+        # poblaciÃ³n ESACOM histÃ³rica aunque la matriz cambie despuÃ©s.
+        resumen = _resumen_cierre_fijo_snapshot_usuario(user, carga, camada, boleta)
+    else:
+        resumen = _resumen_par_snapshot_usuario(user, boleta, camada, carga=carga)
+
+    # Compatibilidad para cierres antiguos sin snapshot de filas. Nunca se usa
+    # este fallback cuando KPICierreFijoFila sÃ­ existe.
+    if (not resumen or not resumen.get("tiene_datos")) and cierre_oficial:
         respaldo = _ultimo_avance_b1_mes(camada)
         if respaldo:
             resumen = _resumen_par_snapshot_usuario(user, "B1", camada, carga=respaldo)
@@ -732,50 +985,62 @@ def _resumen_mes_kpi_usuario(user, camada: str, *, en_curso: bool = False) -> di
     if not resumen:
         return None
 
-    resumen["estado_mes"] = "EN_CURSO" if en_curso else "CERRADO"
-    resumen["cerrado_mes"] = not en_curso
+    resumen["estado_mes"] = "CERRADO" if cierre_oficial else "EN_CURSO"
+    resumen["cerrado_mes"] = bool(cierre_oficial)
     resumen["cierre_oficial"] = bool(cierre_oficial)
-    resumen["origen_cierre_mes"] = "OFICIAL" if cierre_oficial else ("ULTIMO_B1" if not en_curso else "AVANCE_B1")
-    # La etiqueta de la medicion mensual no se debe volver a abrir porque el
-    # mismo mes aparezca como B2/B3 en un reporte posterior.
+    resumen["origen_cierre_mes"] = "OFICIAL" if cierre_oficial else "AVANCE_B1"
     return resumen
 
 
-def _cortes_vigentes_snapshots_usuario(user, focos: dict[str, str]) -> list[dict]:
-    """Solo el mes B1 mas reciente es KPI Calidad en curso para el Ejecutivo."""
-    camada_activa = (focos or {}).get("B1") or ""
-    resumen = _resumen_mes_kpi_usuario(user, camada_activa, en_curso=True)
-    return [resumen] if resumen is not None else []
+def _cortes_vigentes_snapshots_usuario(user, focos: dict[str, str] | None = None) -> list[dict]:
+    """Todas las camadas B1 abiertas; Septiembre y Agosto pueden coexistir."""
+    resultado = []
+    for camada in _camadas_b1_abiertas():
+        resumen = _resumen_mes_kpi_usuario(user, camada, en_curso=True)
+        if resumen is not None:
+            resultado.append(resumen)
+    return resultado
 
 
-def _historico_kpi_usuario_snapshots(user, focos_activos: dict[str, str]) -> list[dict]:
-    """Historico mensual: una tarjeta por mes, sin recalcularlo al pasar a B2/B3."""
+def _historico_kpi_usuario_snapshots(user, focos_activos: dict[str, str] | None = None) -> list[dict]:
+    """Histórico mensual compuesto exclusivamente por CIERRE_FIJO oficial."""
     from integraciones.models import CargaExcel
 
-    camada_activa = (focos_activos or {}).get("B1") or ""
+    MES_INICIO_HISTORICO = "2026-07"
+
     meses = set()
-    for foco_b1, foco_b2, foco_b3 in CargaExcel.objects.filter(
-        tipo_base=CargaExcel.TipoBase.REPORTE_KPI
-    ).exclude(
-        formato_kpi__in=[CargaExcel.FormatoKPI.AVANCE_MOVIL, CargaExcel.FormatoKPI.CIERRE_MOVIL]
+
+    for b1, b2, b3 in CargaExcel.objects.filter(
+        tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
+        estado_reporte=CargaExcel.EstadoReporte.CIERRE,
+        formato_kpi=CargaExcel.FormatoKPI.CIERRE_FIJO,
     ).values_list("foco_b1", "foco_b2", "foco_b3"):
-        for mes in (foco_b1, foco_b2, foco_b3):
-            if mes and (not camada_activa or mes < camada_activa):
-                meses.add(mes)
+        meses.update(
+            m
+            for m in (b1, b2, b3)
+            if m and m >= MES_INICIO_HISTORICO
+        )
 
     resultado = []
+
     for camada in sorted(meses, reverse=True):
-        resumen = _resumen_mes_kpi_usuario(user, camada, en_curso=False)
+        resumen = _resumen_mes_kpi_usuario(
+            user,
+            camada,
+            en_curso=False,
+        )
+
         if resumen and resumen.get("tiene_datos"):
             resultado.append(resumen)
+
     return resultado
 
 
 def _historico_kpi_usuario(user, focos_activos: dict[str, str]) -> list[dict]:
     """Boletas anteriores a la ventana activa, sin fallback ni reescritura.
 
-    ``Corte`` conserva el estado más reciente de cada venta/camada/boleta. El
-    histórico presentado al Ejecutivo se limita por su propiedad ESACOM y
+    ``Corte`` conserva el estado mÃ¡s reciente de cada venta/camada/boleta. El
+    histÃ³rico presentado al Ejecutivo se limita por su propiedad ESACOM y
     solo incluye camadas anteriores a la ventana mensual B1/B2/B3 vigente.
     """
     qs = _scope_cortes_qs(
@@ -789,9 +1054,9 @@ def _historico_kpi_usuario(user, focos_activos: dict[str, str]) -> list[dict]:
 
     activos = {(boleta, mes) for boleta, mes in focos_activos.items() if mes}
     meses_activos = [mes for mes in focos_activos.values() if mes]
-    # La ventana KPI se desplaza por mes. El Histórico solo puede contener
-    # camadas anteriores a la más antigua de las tres boletas vigentes.
-    # Ej.: B1 Jul / B2 Jun / B3 May => Histórico Abr hacia atrás.
+    # La ventana KPI se desplaza por mes. El HistÃ³rico solo puede contener
+    # camadas anteriores a la mÃ¡s antigua de las tres boletas vigentes.
+    # Ej.: B1 Jul / B2 Jun / B3 May => HistÃ³rico Abr hacia atrÃ¡s.
     limite_historico = min(meses_activos) if meses_activos else ""
 
     resultado = []
@@ -820,11 +1085,11 @@ def _historico_kpi_usuario(user, focos_activos: dict[str, str]) -> list[dict]:
 @api_view(["GET"])
 @permission_classes([IsAuthenticated])
 def dashboard_kpi(request):
-    """Dashboard KPI con fuente ESACOM separada de medición Claro.
+    """Dashboard KPI con fuente ESACOM separada de mediciÃ³n Claro.
 
-    Para Ejecutivo no se exponen controles técnicos de sincronización. La
-    respuesta entrega las tres boletas vigentes del último snapshot, metas
-    ESACOM resueltas por vigencia, producción del mes calendario y un histórico
+    Para Ejecutivo no se exponen controles tÃ©cnicos de sincronizaciÃ³n. La
+    respuesta entrega las tres boletas vigentes del Ãºltimo snapshot, metas
+    ESACOM resueltas por vigencia, producciÃ³n del mes calendario y un histÃ³rico
     de boletas anteriores para consulta.
     """
     from integraciones.models import CargaExcel
@@ -846,6 +1111,7 @@ def dashboard_kpi(request):
         ultima_carga = {
             "id": ultima.id,
             "archivo_nombre": ultima.archivo_nombre,
+            "fecha_reporte": (fecha_reporte_desde_nombre(ultima.archivo_nombre).isoformat() if fecha_reporte_desde_nombre(ultima.archivo_nombre) else None),
             "fecha_corte": ultima.fecha_corte.isoformat() if ultima.fecha_corte else None,
             "dia_reporte": ultima.dia_reporte,
             "estado_reporte": ultima.estado_reporte,
@@ -878,6 +1144,7 @@ def dashboard_kpi(request):
         },
         "claro_kpi": {
             "actualizado_en": ultima.creado_en.isoformat() if ultima else None,
+            "fecha_reporte": (fecha_reporte_desde_nombre(ultima.archivo_nombre).isoformat() if ultima and fecha_reporte_desde_nombre(ultima.archivo_nombre) else None),
             "fecha_corte": ultima.fecha_corte.isoformat() if ultima and ultima.fecha_corte else None,
             "dia_reporte": ultima.dia_reporte if ultima else None,
         },
@@ -922,11 +1189,12 @@ def dashboard_kpi(request):
     )
 
     if getattr(request.user, "es_honorarios", False) and es_ejecutivo_raso:
-        # Honorarios ve la misma separación temporal que Regular: producción
-        # ESACOM del mes calendario actual + Calidad Claro del período medido.
+        # Honorarios ve la misma separaciÃ³n temporal que Regular: producciÃ³n
+        # ESACOM del mes calendario actual + Calidad Claro del perÃ­odo medido.
         # La diferencia es que su porcentaje de pago NO hereda meta Regular.
         ventas_h_mes = ventas_scope.filter(
-            origen_venta=Venta.OrigenVenta.HONORARIOS, camada=mes_actual
+            camada=mes_actual,
+            en_base_vigente=True,
         )
         cortes_h = _cortes_vigentes_snapshots_usuario(request.user, focos)
         historico_h = _historico_kpi_usuario_snapshots(request.user, focos)
@@ -948,17 +1216,17 @@ def dashboard_kpi(request):
         })
 
     # Ejecutivo y Supervisor consumen snapshots inmutables: un CIERRE nunca
-    # es reemplazado por avances posteriores. El alcance se resuelve según el
+    # es reemplazado por avances posteriores. El alcance se resuelve segÃºn el
     # usuario (cartera propia, equipo o global).
     cortes_actuales = _cortes_vigentes_snapshots_usuario(request.user, focos)
-    historico_kpi = _historico_kpi_usuario_snapshots(request.user, focos) if es_ejecutivo_raso else []
+    historico_kpi = _historico_kpi_usuario_snapshots(request.user, focos) if (es_ejecutivo_raso or request.user.es_supervisor) else []
     return Response({
         "perfil_kpi": "REGULAR",
         "cortes": cortes_actuales,
         "cortes_todos": resumen_por_corte(cortes_regulares),
         "historico_kpi": historico_kpi,
         "ultima_carga": ultima_carga,
-        # El Ejecutivo no necesita ni debe ver información técnica de cargas.
+        # El Ejecutivo no necesita ni debe ver informaciÃ³n tÃ©cnica de cargas.
         "estado_datos": None if es_ejecutivo_raso else estado_datos,
         "resumen_ventas": resumen_ventas,
         "resumen_mes_actual": resumen_mes_actual,
@@ -993,7 +1261,8 @@ def dashboard_kpi_ejecutivos(request):
         honorarios_qs = honorarios_qs.none()
 
     honorarios = []
-    camada_activa = (focos or {}).get("B1") or ""
+    camadas_abiertas = _camadas_b1_abiertas()
+    camada_activa = camadas_abiertas[0] if camadas_abiertas else ((focos or {}).get("B1") or "")
     for ejecutivo in honorarios_qs.select_related("supervisor").order_by("nombre"):
         calidad = _resumen_mes_kpi_usuario(ejecutivo, camada_activa, en_curso=True) if camada_activa else None
         produccion = resumen_produccion_mes(mes=mes_actual, ejecutivo=ejecutivo)
@@ -1011,16 +1280,46 @@ def dashboard_kpi_ejecutivos(request):
             "produccion_mes_actual": produccion,
         })
 
+    regulares_qs = Ejecutivo.objects.filter(
+        cargo=Ejecutivo.Cargo.EJECUTIVO,
+        tipo_kpi=Ejecutivo.TipoKPI.REGULAR,
+        is_active=True,
+    ).select_related("supervisor").order_by("nombre")
+    if request.user.es_supervisor:
+        regulares_qs = regulares_qs.filter(supervisor=request.user)
+    elif not request.user.tiene_alcance_global:
+        regulares_qs = regulares_qs.none()
+
+    ejecutivos_snapshot = []
+    for ejecutivo in regulares_qs:
+        calidad = _resumen_mes_kpi_usuario(ejecutivo, camada_activa, en_curso=True) if camada_activa else None
+        if not calidad or not calidad.get("tiene_datos"):
+            continue
+        ejecutivos_snapshot.append({
+            "ejecutivo": {
+                "id": ejecutivo.id,
+                "rut": ejecutivo.rut,
+                "nombre": ejecutivo.nombre,
+                "equipo": ejecutivo.equipo,
+                "tipo_kpi": ejecutivo.tipo_kpi,
+                "supervisor_id": ejecutivo.supervisor_id,
+                "supervisor_nombre": ejecutivo.supervisor.nombre if ejecutivo.supervisor_id else "",
+            },
+            "cortes": [calidad],
+            "promedio_focos": round(float(calidad.get("pct_cumplimiento") or 0), 1),
+        })
+    ejecutivos_snapshot.sort(key=lambda r: (r["promedio_focos"], r["ejecutivo"]["nombre"]))
+
     return Response({
-        "ejecutivos": resumen_por_ejecutivo_actual(
-            _cortes_visibles(request.user, carga_kpi=ultima), focos=focos, metas=metas
-        ),
+        "ejecutivos": ejecutivos_snapshot,
         "honorarios": honorarios,
         "snapshot": {
             "id": ultima.id,
             "fecha_corte": ultima.fecha_corte.isoformat() if ultima and ultima.fecha_corte else None,
             "dia_reporte": ultima.dia_reporte if ultima else None,
             "archivo_nombre": ultima.archivo_nombre if ultima else None,
+            "fecha_reporte": (fecha_reporte_desde_nombre(ultima.archivo_nombre).isoformat() if ultima and fecha_reporte_desde_nombre(ultima.archivo_nombre) else None),
+            "camadas_abiertas": camadas_abiertas,
             "focos": focos,
             "metas": metas,
             "metas_reporte_claro": _metas_reporte_carga(ultima),
@@ -1037,6 +1336,7 @@ def _metadata_snapshot_kpi(carga):
     return {
         "id": carga.id,
         "archivo_nombre": carga.archivo_nombre,
+        "fecha_reporte": (fecha_reporte_desde_nombre(carga.archivo_nombre).isoformat() if fecha_reporte_desde_nombre(carga.archivo_nombre) else None),
         "fecha_corte": carga.fecha_corte.isoformat() if carga.fecha_corte else None,
         "dia_reporte": carga.dia_reporte,
         "estado_reporte": carga.estado_reporte,
@@ -1052,13 +1352,11 @@ def _metadata_snapshot_kpi(carga):
     }
 
 
-def _resumen_snapshot_historico(carga, focos):
-    """Recalcula un snapshot histórico respetando la fuente maestra ESACOM.
+def _resumen_snapshot_historico(carga, focos, user=None):
+    """Resume una carga histÃ³rica sin volver a consultar la matriz ESACOM actual.
 
-    Se usan los estados y RGU tal como llegaron en esa carga KPI. La venta,
-    su vigencia y su dueño comercial siguen viniendo de ESACOM. Esto permite
-    comparar lunes/miércoles sin usar PROPIETARIO_FINAL como propietario ni
-    sustituir datos maestros ESACOM.
+    Si ``user`` se entrega, el alcance se resuelve con ``snapshot_esacom``.
+    Sin usuario se mantiene un fallback compatible para pruebas legacy.
     """
     from integraciones.models import KPIRegistro
 
@@ -1069,57 +1367,22 @@ def _resumen_snapshot_historico(carga, focos):
         camada = (focos or {}).get(boleta) or ""
         if not camada:
             continue
-        qs = KPIRegistro.objects.filter(
-            carga=carga,
-            camada=camada,
-            boleta=boleta,
-            cruce_ok=True,
-            venta__estado_instalacion=Venta.EstadoInstalacion.INSTALADO,
-            venta__ejecutivo__tipo_kpi=Ejecutivo.TipoKPI.REGULAR,
-            venta__ejecutivo__cargo=Ejecutivo.Cargo.EJECUTIVO,
-            venta__ejecutivo__is_active=True,
-        ).select_related("venta", "venta__promocion")
-        acumulado = {
-            Corte.EstadoPago.PAGADO: 0,
-            Corte.EstadoPago.PENDIENTE: 0,
-            Corte.EstadoPago.NO_PAGO: 0,
-            Corte.EstadoPago.FUERA_PLAZO: 0,
-            Corte.EstadoPago.SIN_BOLETA: 0,
-        }
-        fuera_medicion = 0
-        for registro in qs:
-            # El KPI histórico se pondera con el RGU del snapshot Claro.
-            # ESACOM sigue definiendo venta/propiedad; no redefine el peso KPI.
-            rgu = registro.rgu
-            if rgu is None:
-                rgu = registro.venta.rgu_base
-            if rgu is None:
-                rgu = getattr(registro.venta.promocion, "rgu", None) or 1
-            rgu = int(rgu)
-            if not registro.es_medible:
-                fuera_medicion += rgu
-                continue
-            estado = registro.estado_normalizado
-            acumulado[estado] = acumulado.get(estado, 0) + rgu
-        pagadas = acumulado[Corte.EstadoPago.PAGADO]
-        pendientes = acumulado[Corte.EstadoPago.PENDIENTE]
-        no_pago = acumulado[Corte.EstadoPago.NO_PAGO]
-        fuera_plazo = acumulado[Corte.EstadoPago.FUERA_PLAZO]
-        sin_boleta = acumulado[Corte.EstadoPago.SIN_BOLETA]
-        total = pagadas + pendientes + no_pago + fuera_plazo
-        pct = round((pagadas / total * 100), 2) if total else 0.0
-        resultado[boleta] = {
-            "boleta": boleta,
-            "mes_ano": camada,
-            "pagadas": pagadas,
-            "pendientes": pendientes,
-            "no_pago": no_pago,
-            "fuera_plazo": fuera_plazo,
-            "sin_boleta": sin_boleta,
-            "fuera_medicion": fuera_medicion,
-            "total": total,
-            "pct_cumplimiento": pct,
-        }
+        qs = KPIRegistro.objects.filter(carga=carga, camada=camada, boleta=boleta)
+        if user is not None:
+            registros = _scope_registros_kpi_qs(qs, user)
+        else:
+            # Compatibilidad con pruebas/instalaciones aÃºn no sembradas.
+            registros = qs.filter(
+                cruce_ok=True,
+                venta__estado_instalacion=Venta.EstadoInstalacion.INSTALADO,
+                venta__ejecutivo__tipo_kpi=Ejecutivo.TipoKPI.REGULAR,
+                venta__ejecutivo__cargo=Ejecutivo.Cargo.EJECUTIVO,
+                venta__ejecutivo__is_active=True,
+            ).select_related("venta", "venta__promocion")
+        meta = meta_calidad_para(boleta=boleta, camada=camada, fallback=getattr(carga, f"meta_{boleta.lower()}", None))
+        resumen = resumen_kpi_registros(registros, meta_pct=serializar_meta(meta) or 0)
+        resumen.update({"boleta": boleta, "mes_ano": camada})
+        resultado[boleta] = resumen
     return resultado
 
 
@@ -1129,20 +1392,22 @@ def dashboard_gerencia(request):
     """Resumen ejecutivo consistente con Portal Ejecutivo/Supervisor.
 
     ESACOM define venta, RUT, RGU y estructura comercial. Claro aporta los
-    snapshots KPI. Entrega ranking por Supervisor/Ejecutivo, evolución del
-    último snapshot contra el anterior y datos operativos para drill-down.
+    snapshots KPI. Entrega ranking por Supervisor/Ejecutivo, evoluciÃ³n del
+    Ãºltimo snapshot contra el anterior y datos operativos para drill-down.
     """
     from integraciones.models import CargaExcel, KPIRegistro
     from usuarios.models import Ejecutivo
 
-    cargas = list(
+    cargas = sorted(
         CargaExcel.objects.filter(
             tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
             estado_reporte=CargaExcel.EstadoReporte.AVANCE,
             formato_kpi=CargaExcel.FormatoKPI.DETALLADO,
             fecha_corte__isnull=False,
-        ).order_by("-fecha_corte", "-creado_en", "-id")[:2]
-    )
+        ),
+        key=_clave_temporal_carga,
+        reverse=True,
+    )[:2]
     if not cargas:
         fallback = _ultima_carga_kpi_activa()
         cargas = [fallback] if fallback else []
@@ -1153,48 +1418,52 @@ def dashboard_gerencia(request):
     focos = snap_actual["focos"] if snap_actual else {}
     metas = snap_actual["metas"] if snap_actual else {}
 
-    cortes = _cortes_visibles(request.user, carga_kpi=ultima)
-    # El dashboard gerencial B1/B2/B3 es REGULAR. Honorarios se informa y
-    # parametriza por separado, igual que en Ejecutivo y Supervisor.
-    cortes_regulares = cortes.filter(
-        venta__ejecutivo__tipo_kpi=Ejecutivo.TipoKPI.REGULAR,
-        venta__ejecutivo__cargo=Ejecutivo.Cargo.EJECUTIVO,
-        venta__ejecutivo__is_active=True,
-    )
-    global_actual = resumen_cortes_actuales(cortes_regulares, focos=focos, metas=metas)
-    ejecutivos = resumen_por_ejecutivo_actual(cortes_regulares, focos=focos, metas=metas)
-    supervisores = resumen_por_supervisor_actual(cortes_regulares, focos=focos, metas=metas)
-
-    # Evolución comparable: recalculamos los mismos focos ACTUALES en ambos
-    # snapshots. Si el snapshot anterior aún no contenía esa camada, queda null.
-    historico_actual = _resumen_snapshot_historico(ultima, focos)
-    historico_anterior = _resumen_snapshot_historico(anterior, focos)
-    comparacion = []
+    # R2.17.2: la portada no materializa rankings ni accionables. Esos datos
+    # tienen pantallas/endpoints propios y no son renderizados por
+    # DashboardGerencia.jsx. Evitar cargarlos aquÃ­ elimina el N+1 que llevaba
+    # el request inicial a cientos de consultas.
+    # KPI Gerencia sale del snapshot ESACOM+Claro de la carga, no de Venta
+    # actual. AsÃ­ una sincronizaciÃ³n posterior solo modifica OperaciÃ³n actual.
+    global_actual = []
     for boleta in ("B1", "B2", "B3"):
-        actual = historico_actual.get(boleta)
-        previo = historico_anterior.get(boleta)
-        comparacion.append({
-            "boleta": boleta,
-            "mes_ano": focos.get(boleta, ""),
-            "actual": actual,
-            "anterior": previo if previo and previo.get("total", 0) > 0 else None,
-            "delta_pp": round(actual["pct_cumplimiento"] - previo["pct_cumplimiento"], 1)
-            if actual and previo and previo.get("total", 0) > 0 else None,
-        })
+        camada = (focos or {}).get(boleta) or ""
+        if not camada:
+            continue
+        resumen = _resumen_par_snapshot_usuario(request.user, boleta, camada, carga=ultima)
+        if resumen:
+            global_actual.append(resumen)
 
-    # Operación ACTUAL: la portada de Gerencia no debe mezclar acumulados
-    # históricos con el mes calendario vigente. ESACOM sigue siendo la fuente
-    # maestra operacional; Claro solo aporta la medición de Calidad.
+    # Compatibilidad de contrato: la portada conserva las claves, pero no
+    # calcula payloads que no utiliza. Rankings se consultan en Ejecutivos y
+    # la auditorÃ­a/accionables en sus mÃ³dulos dedicados.
+    ejecutivos = []
+    supervisores = []
+    comparacion = []
+
+    # OperaciÃ³n ACTUAL: la portada de Gerencia no debe mezclar acumulados
+    # histÃ³ricos con el mes calendario vigente. ESACOM sigue siendo la fuente
+    # maestra operacional; Claro solo aporta la mediciÃ³n de Calidad.
     mes_actual = timezone.localdate().strftime("%Y-%m")
-    # Solo la base ESACOM vigente del mes, más la hoja Honorarios del mismo
-    # período. Así una venta histórica que ya no está en la matriz vigente no
+    # Solo la base ESACOM vigente del mes, mÃ¡s la hoja Honorarios del mismo
+    # perÃ­odo. AsÃ­ una venta histÃ³rica que ya no estÃ¡ en la matriz vigente no
     # vuelve a inflar Clientes/Instaladas/Pendientes de la portada.
     ventas_scope = Venta.objects.select_related("ejecutivo").filter(
         models.Q(en_base_vigente=True) | models.Q(origen_venta=Venta.OrigenVenta.HONORARIOS)
     )
     actividad_mes = _resumen_ventas_mes(ventas_scope, mes_actual)
-    from ventas.produccion import resumen_produccion_mes
+    from ventas.produccion import (
+        detalle_produccion_actual,
+        resumen_movil_vigente_por_supervisor,
+        resumen_produccion_actual,
+        resumen_produccion_mes,
+    )
+    # Dos universos deliberadamente separados:
+    # - producción del mes: ventas cuya fecha/camada pertenece al mes calendario;
+    # - control operativo: fotografía vigente de ESACOM (mismo universo del control diario).
     produccion_mes = resumen_produccion_mes(mes=mes_actual)
+    control_operativo = resumen_produccion_actual()
+    detalle_control = detalle_produccion_actual()
+    movil_por_supervisor = resumen_movil_vigente_por_supervisor()
     ultima_esacom = CargaExcel.objects.filter(
         tipo_base__in=[CargaExcel.TipoBase.BASE_MATRIZ, CargaExcel.TipoBase.ANDES]
     ).order_by("-creado_en").first()
@@ -1213,9 +1482,10 @@ def dashboard_gerencia(request):
         "rgu_fijo_vendidos": produccion_mes.get("rgu_fijo_vendidos", 0),
         "rgu_fijo_gestionables": produccion_mes.get("rgu_fijo_gestionables", 0),
         "ventas_fijo": produccion_mes.get("ventas_fijo", 0),
-        "movil_portadas": produccion_mes.get("kpi_movil_portadas", 0),
-        "movil_principal": produccion_mes.get("movil", {}).get("principal", 0),
-        "movil_adicional": produccion_mes.get("movil", {}).get("adicional", 0),
+        "movil_portadas": control_operativo.get("kpi_movil_portadas", 0),
+        "movil_principal": control_operativo.get("movil_principal", 0),
+        "movil_adicional": control_operativo.get("movil_adicional", 0),
+        "movil_por_supervisor": movil_por_supervisor,
         "ejecutivos_activos": ejecutivos_activos.count(),
         "ejecutivos_regulares_activos": ejecutivos_activos.filter(tipo_kpi=Ejecutivo.TipoKPI.REGULAR).count(),
         "ejecutivos_honorarios_activos": ejecutivos_activos.filter(tipo_kpi=Ejecutivo.TipoKPI.HONORARIOS).count(),
@@ -1225,35 +1495,98 @@ def dashboard_gerencia(request):
         ).count(),
         "ultima_sync_esacom": ultima_esacom.creado_en.isoformat() if ultima_esacom else None,
         "archivo_esacom": ultima_esacom.archivo_nombre if ultima_esacom else None,
+        "produccion_mes": {
+            "mes": mes_actual,
+            "rgu_fijo_vendidos": produccion_mes.get("rgu_fijo_vendidos", 0),
+            "ventas_fijo": produccion_mes.get("ventas_fijo", 0),
+            "rgu_fijo_gestionables": produccion_mes.get("rgu_fijo_gestionables", 0),
+            "rgu_fijo_anulados": produccion_mes.get("rgu_fijo_anulados", 0),
+            "movil_portadas": produccion_mes.get("kpi_movil_portadas", 0),
+            "movil_principal": produccion_mes.get("movil", {}).get("principal", 0),
+            "movil_adicional": produccion_mes.get("movil", {}).get("adicional", 0),
+        },
+        "control_operativo": {
+            "rgu_completadas": control_operativo.get("rgu_fijo_completados", 0),
+            "rgu_pendiente_instalacion": control_operativo.get("rgu_fijo_pendiente_instalacion", 0),
+            "rgu_pendiente_comercial": control_operativo.get("rgu_fijo_pendiente_comercial", 0),
+            "rgu_anulados": control_operativo.get("rgu_fijo_anulados", 0),
+            "rgu_total_control": control_operativo.get("rgu_fijo_control", 0),
+            "movil_portadas": control_operativo.get("kpi_movil_portadas", 0),
+            "movil_principal": control_operativo.get("movil_principal", 0),
+            "movil_adicional": control_operativo.get("movil_adicional", 0),
+            "movil_pendiente_activacion": control_operativo.get("movil_pendiente_activacion", 0),
+            "fijo_por_supervisor": {
+                nombre: {
+                    "completadas": datos.get("fija", {}).get("completadas", 0),
+                    "pendiente_instalacion": datos.get("fija", {}).get("pendiente_instalacion", 0),
+                    "total_control": datos.get("fija", {}).get("total_control", 0),
+                }
+                for nombre, datos in detalle_control.get("supervisores", {}).items()
+            },
+            "movil_por_supervisor": movil_por_supervisor,
+        },
     }
 
-    auditoria = None
-    if ultima:
-        qs = KPIRegistro.objects.filter(carga=ultima)
-        inconsistentes = qs.filter(
-            models.Q(diferencia_rut=True)
-            | models.Q(diferencia_rgu=True)
-            | models.Q(diferencia_propietario=True)
-            | models.Q(diferencia_estado=True)
-            | models.Q(ejecutivo_kpi_no_resuelto=True)
-        )
-        auditoria = {
-            "total": qs.count(),
-            "cruzados": qs.filter(cruce_ok=True).count(),
-            "sin_cruce": qs.filter(cruce_ok=False).count(),
-            "inconsistencias": inconsistentes.count(),
-            "diferencia_rut": qs.filter(diferencia_rut=True).count(),
-            "diferencia_rgu": qs.filter(diferencia_rgu=True).count(),
-            "diferencia_propietario": qs.filter(diferencia_propietario=True).count(),
-            "diferencia_estado": qs.filter(diferencia_estado=True).count(),
-            "fuera_medicion": qs.filter(es_medible=False).count(),
+    # La portada gerencial debe reproducir el control manual diario de la hoja
+    # ``Resumen`` cuando ese bloque estÃ¡ disponible en el mismo XLSX de ESACOM.
+    # Conservamos el cÃ¡lculo mensual anterior como auditorÃ­a para explicar la
+    # diferencia de universo/unidad, pero no lo mostramos como control oficial.
+    resumen_fuente = ((ultima_esacom.resumen_produccion or {}).get("resumen_gerencia_fuente", {}) if ultima_esacom else {})
+    if resumen_fuente.get("disponible"):
+        fija_resumen = resumen_fuente.get("ventas_fijas", {}) or {}
+        calculo_mes = {
+            "rgu_fijo": int(operacion["rgu_fijo_vendidos"] or 0),
+            "completada": int(operacion["instaladas"] or 0),
+            "pendiente_instalacion": int(operacion["pendiente_instalacion"] or 0),
+            "pendiente_comercial": int(operacion["pendiente_comercial"] or 0),
+            "anulado": int(operacion["anuladas"] or 0),
         }
+        oficial = {
+            "rgu_fijo": int(fija_resumen.get("total_rgu", 0) or 0),
+            "completada": int(fija_resumen.get("completada", 0) or 0),
+            "pendiente_instalacion": int(fija_resumen.get("pendiente_instalacion", 0) or 0),
+            "pendiente_comercial": int(fija_resumen.get("pendiente_comercial", 0) or 0),
+            "anulado": int(fija_resumen.get("anulado", 0) or 0),
+            "derivado_redes": int(fija_resumen.get("derivado_redes", 0) or 0),
+        }
+        operacion.update({
+            "fuente_operacion": "RESUMEN_ESACOM",
+            "rgu_fijo_vendidos": oficial["rgu_fijo"],
+            "instaladas": oficial["completada"],
+            "pendiente_instalacion": oficial["pendiente_instalacion"],
+            "pendiente_comercial": oficial["pendiente_comercial"],
+            "anuladas": oficial["anulado"],
+            "derivado_redes": oficial["derivado_redes"],
+            "completada_por_supervisor": resumen_fuente.get("completada_por_supervisor", {}) or {},
+            "cruce_claro_total": int((resumen_fuente.get("cruce_claro", {}) or {}).get("total", 0) or 0),
+            "cruce_claro_por_supervisor": (resumen_fuente.get("cruce_claro", {}) or {}).get("por_supervisor", {}) or {},
+            "calculo_mes_crm": calculo_mes,
+            "diferencias_resumen_vs_mes": {
+                clave: oficial.get(clave, 0) - calculo_mes.get(clave, 0)
+                for clave in ("rgu_fijo", "completada", "pendiente_instalacion", "pendiente_comercial", "anulado")
+            },
+        })
+    else:
+        operacion["fuente_operacion"] = "CALCULO_MES_CRM"
 
-    accionables = resumen_accionables(cortes_regulares)
+    # La portada no renderiza AuditorÃ­a KPI ni Accionables. Mantener estos
+    # cÃ¡lculos aquÃ­ generaba 7 COUNT completos y materializaciÃ³n de Corte en
+    # cada apertura. Los mÃ³dulos dedicados siguen entregando esa informaciÃ³n.
+    auditoria = None
+    accionables = {}
+    camadas_abiertas = _camadas_b1_abiertas()
+    calidad_abierta = [
+        resumen for resumen in (
+            _resumen_mes_kpi_usuario(request.user, camada, en_curso=True)
+            for camada in camadas_abiertas
+        ) if resumen is not None
+    ]
     return Response({
         "snapshot_actual": snap_actual,
         "snapshot_anterior": snap_anterior,
         "global": global_actual,
+        "calidad_abierta": calidad_abierta,
+        "camadas_abiertas": camadas_abiertas,
         "comparacion": comparacion,
         "supervisores": supervisores,
         "ejecutivos": ejecutivos,
@@ -1297,7 +1630,7 @@ def dashboard_gerencia_buscar_usuario(request):
 @api_view(["GET"])
 @permission_classes([PuedeDashboardOAnalisis])
 def dashboard_gerencia_usuario_detalle(request, pk):
-    """KPI actual, producción actual e histórico de una persona seleccionada."""
+    """KPI actual, producciÃ³n actual e histÃ³rico de una persona seleccionada."""
     try:
         usuario = Ejecutivo.objects.select_related("supervisor").get(pk=pk)
     except Ejecutivo.DoesNotExist:
@@ -1308,15 +1641,21 @@ def dashboard_gerencia_usuario_detalle(request, pk):
 
     ultima = _ultima_carga_kpi_activa()
     focos = _focos_carga(ultima)
-    camada_activa = focos.get("B1") or ""
-    calidad_actual = _resumen_mes_kpi_usuario(usuario, camada_activa, en_curso=True) if camada_activa else None
+    camadas_abiertas = _camadas_b1_abiertas()
+    calidad_abierta = [
+        resumen for resumen in (
+            _resumen_mes_kpi_usuario(usuario, camada, en_curso=True)
+            for camada in camadas_abiertas
+        ) if resumen is not None
+    ]
+    calidad_actual = calidad_abierta[0] if calidad_abierta else None
     historico = _historico_kpi_usuario_snapshots(usuario, focos)
 
     from ventas.produccion import resumen_produccion_mes
     mes_actual = timezone.localdate().strftime("%Y-%m")
     if usuario.cargo == Ejecutivo.Cargo.SUPERVISOR:
-        produccion_mes = resumen_produccion_mes(mes=mes_actual, supervisor=usuario)
-        produccion_propia = resumen_produccion_mes(mes=mes_actual, ejecutivo=usuario)
+        produccion_mes = resumen_produccion_mes(mes=mes_actual, supervisor=usuario, movil_vigente_actual=True)
+        produccion_propia = resumen_produccion_mes(mes=mes_actual, ejecutivo=usuario, movil_vigente_actual=True)
         dotacion = Ejecutivo.objects.filter(
             cargo=Ejecutivo.Cargo.EJECUTIVO, supervisor=usuario, is_active=True
         )
@@ -1326,7 +1665,7 @@ def dashboard_gerencia_usuario_detalle(request, pk):
             "honorarios": dotacion.filter(tipo_kpi=Ejecutivo.TipoKPI.HONORARIOS).count(),
         }
     else:
-        produccion_mes = resumen_produccion_mes(mes=mes_actual, ejecutivo=usuario)
+        produccion_mes = resumen_produccion_mes(mes=mes_actual, ejecutivo=usuario, movil_vigente_actual=True)
         produccion_propia = None
         equipo = None
 
@@ -1343,6 +1682,8 @@ def dashboard_gerencia_usuario_detalle(request, pk):
         },
         "mes_actual": mes_actual,
         "calidad_actual": calidad_actual,
+        "calidad_abierta": calidad_abierta,
+        "camadas_abiertas": camadas_abiertas,
         "produccion_mes_actual": produccion_mes,
         "produccion_propia_mes_actual": produccion_propia,
         "equipo": equipo,
@@ -1353,7 +1694,7 @@ def dashboard_gerencia_usuario_detalle(request, pk):
 
 
 def _config_cierres_canal(canal: str):
-    """Configura el origen de cierres sin mezclar Fijo y Móvil."""
+    """Configura el origen de cierres sin mezclar Fijo y MÃ³vil."""
     from integraciones.models import CargaExcel
 
     canal = str(canal or "").strip().upper()
@@ -1378,7 +1719,7 @@ def _cierres_oficiales_canal(canal: str):
     Un mes se considera cerrado exclusivamente cuando Claro fue cargado como
     ``CIERRE_FIJO`` o ``CIERRE_MOVIL``. Los AVANCE nunca cierran meses.
     Si por error se cargara otro cierre posterior del mismo mes, se conserva
-    el primero, igual que la regla histórica de ``_cierre_oficial_mes``.
+    el primero, igual que la regla histÃ³rica de ``_cierre_oficial_mes``.
     """
     from integraciones.models import CargaExcel
 
@@ -1428,6 +1769,7 @@ def _metadata_cierre(carga, boleta: str, camada: str, canal: str) -> dict:
         "estado": "CIERRE_OFICIAL" if carga.estado_reporte == "CIERRE" else "EN_CURSO",
         "carga_id": carga.id,
         "archivo": carga.archivo_nombre,
+        "fecha_reporte": (fecha_reporte_desde_nombre(carga.archivo_nombre).isoformat() if fecha_reporte_desde_nombre(carga.archivo_nombre) else None),
         "fecha_corte": carga.fecha_corte.isoformat() if carga.fecha_corte else None,
         "dia_reporte": carga.dia_reporte,
         "formato_kpi": carga.formato_kpi,
@@ -1458,11 +1800,11 @@ def _resumen_cierre_para_gerencia(request, carga, boleta: str, camada: str, cana
 
 
 def _resumen_planilla_cierre_fijo(qs):
-    """Replica la tabla dinámica usada por Gerencia en ``Cierre KPI jul``.
+    """Replica la tabla dinÃ¡mica usada por Gerencia en ``Cierre KPI jul``.
 
     A diferencia del KPI CRM (Pago / RGU medibles), esta vista de control usa
     Pago / Total general e incluye S/B y estados no clasificados (#N/D), tal
-    como la planilla de cierre entregada por Gerencia. Se muestra como métrica
+    como la planilla de cierre entregada por Gerencia. Se muestra como mÃ©trica
     paralela; no reemplaza la regla KPI oficial del portal.
     """
     acumulado = {
@@ -1497,7 +1839,7 @@ def _resumen_planilla_cierre_fijo(qs):
         texto = " ".join(str(registro.kpi_texto or "").strip().upper().replace("_", " ").split())
         bucket = conocidos.get(texto)
         if bucket is None:
-            # Si el texto original no está disponible, usamos el estado
+            # Si el texto original no estÃ¡ disponible, usamos el estado
             # normalizado; cualquier otro valor queda como #N/D.
             fallback = {
                 Corte.EstadoPago.PAGADO: "pagadas",
@@ -1523,7 +1865,7 @@ def _desglose_cierre_fijo(carga, boleta: str, camada: str):
 
     - KPI CRM conserva la regla validada del portal (Regular activo, Pago/RGU
       medibles).
-    - La tabla de cierre Gerencia replica la planilla manual: población ESACOM
+    - La tabla de cierre Gerencia replica la planilla manual: poblaciÃ³n ESACOM
       instalada del mes de FECHA CIERRE, RGU ESACOM, estado original Claro,
       incluyendo inactivos, Honorarios, S/B y filas sin cruce (#N/D).
     """
@@ -1619,7 +1961,7 @@ def _desglose_cierre_fijo(carga, boleta: str, camada: str):
             "sin_boleta": int(plan.get("sin_boleta") or 0),
             "total_cierre": int(plan.get("total_general") or 0),
             "meta_pct": meta_pct,
-            # KPI CRM es paralelo. Si ese histórico no pertenece al universo
+            # KPI CRM es paralelo. Si ese histÃ³rico no pertenece al universo
             # Regular activo actual, se deja nulo en vez de inventarlo.
             "pct_cumplimiento": (crm or {}).get("pct_cumplimiento"),
             "faltan_para_meta": (crm or {}).get("faltan_para_meta"),
@@ -1633,7 +1975,7 @@ def _desglose_cierre_fijo(carga, boleta: str, camada: str):
         completar_desde_planilla(item, crm_por_rut.get(rut))
 
     # En supervisores la fuente manual usa el nombre de supervisor de la venta
-    # histórica. KPI CRM usa la dotación vigente; solo lo vinculamos cuando el
+    # histÃ³rica. KPI CRM usa la dotaciÃ³n vigente; solo lo vinculamos cuando el
     # nombre coincide exactamente para no reasignar historia.
     crm_sup_por_nombre = {
         " ".join(str(x.get("nombre") or "").upper().split()): x
@@ -1704,7 +2046,7 @@ def _desglose_cierre_movil(carga, boleta: str, camada: str):
             **r,
         })
 
-    # El reporte móvil ya viene agregado por vendedor. Sumamos esas filas para
+    # El reporte mÃ³vil ya viene agregado por vendedor. Sumamos esas filas para
     # la vista por Supervisor sin inventar pedidos que el archivo no trae.
     buckets = {}
     for fila in ejecutivos:
@@ -1761,7 +2103,7 @@ def _detalle_cierre(request, canal: str, camada: str):
 @api_view(["GET"])
 @permission_classes([PuedeDashboardGerencia])
 def dashboard_gerencia_cierres(request):
-    """Período abierto + histórico de CIERRES oficiales por canal."""
+    """PerÃ­odo abierto + histÃ³rico de CIERRES oficiales por canal."""
     canal = str(request.query_params.get("canal") or "FIJO").upper()
     cfg = _config_cierres_canal(canal)
     if not cfg:
@@ -1911,14 +2253,14 @@ def _ventas_visibles(user):
 def resumen_equipo_view(request):
     """GET /api/equipo/resumen/ -- cabecera del Portal Supervisor.
 
-    La cantidad de ejecutivos representa la DOTACIÓN ASIGNADA al Supervisor,
+    La cantidad de ejecutivos representa la DOTACIÃ“N ASIGNADA al Supervisor,
     no solamente quienes tienen ventas en la cartera visible. Esto evita que
-    el dashboard muestre, por ejemplo, 23 vendedores cuando la dotación real
+    el dashboard muestre, por ejemplo, 23 vendedores cuando la dotaciÃ³n real
     son 25 (17 Regular + 8 Honorarios).
     """
     data = resumen_equipo(_ventas_visibles(request.user))
     if request.user.es_supervisor:
-        from ventas.produccion import resumen_produccion_mes
+        from ventas.produccion import resumen_produccion_actual, resumen_produccion_mes
         from integraciones.models import CargaExcel
 
         equipo = Ejecutivo.objects.filter(
@@ -1928,6 +2270,8 @@ def resumen_equipo_view(request):
         produccion_equipo_mes = resumen_produccion_mes(mes=mes_actual, supervisor=request.user)
         produccion_supervisor_mes = resumen_produccion_mes(mes=mes_actual, ejecutivo=request.user)
         actividad_equipo_mes = _resumen_ventas_mes(_ventas_visibles(request.user), mes_actual)
+        control_operativo_equipo = resumen_produccion_actual(supervisor=request.user)
+        control_operativo_supervisor = resumen_produccion_actual(ejecutivo=request.user)
         ventas_propias = Venta.objects.filter(ejecutivo=request.user)
         actividad_supervisor_mes = _resumen_ventas_mes(ventas_propias, mes_actual)
         ultima_esacom = CargaExcel.objects.filter(
@@ -1943,6 +2287,8 @@ def resumen_equipo_view(request):
             "mes_actual": mes_actual,
             "produccion_equipo_mes": produccion_equipo_mes,
             "produccion_supervisor_mes": produccion_supervisor_mes,
+            "control_operativo_equipo": control_operativo_equipo,
+            "control_operativo_supervisor": control_operativo_supervisor,
             "actividad_equipo_mes": actividad_equipo_mes,
             "actividad_supervisor_mes": actividad_supervisor_mes,
             "ultima_carga_esacom": ultima_esacom.creado_en.isoformat() if ultima_esacom else None,
@@ -1953,38 +2299,20 @@ def resumen_equipo_view(request):
 @api_view(["GET"])
 @permission_classes([PuedeAccionables])
 def dashboard_accionables(request):
-    """GET /api/dashboard/accionables/ -- gestión diaria del KPI vigente.
-
-    La pantalla usa exactamente B1/B2/B3 del último snapshot KPI activo para
-    que los pendientes coincidan con Mi Portal y no aparezcan deudas históricas
-    fuera del foco vigente.
-    """
-    from integraciones.models import CargaExcel
-
+    """GestiÃ³n diaria de todas las camadas B1 que siguen oficialmente abiertas."""
     ultima = _ultima_carga_kpi_activa()
-    focos = {
-        "B1": ultima.foco_b1 or (_restar_meses(ultima.fecha_corte, 1) if ultima and ultima.fecha_corte else "") if ultima else "",
-        "B2": ultima.foco_b2 or (_restar_meses(ultima.fecha_corte, 2) if ultima and ultima.fecha_corte else "") if ultima else "",
-        "B3": ultima.foco_b3 or (_restar_meses(ultima.fecha_corte, 3) if ultima and ultima.fecha_corte else "") if ultima else "",
-    }
-    # La gestión diaria sigue únicamente el mes KPI Calidad en curso (B1).
-    # B2/B3 de meses ya cerrados quedan como evidencia histórica y no vuelven
-    # a generar deuda operativa para el Ejecutivo.
-    focos_abiertos = {}
-    camada_activa = focos.get("B1") or ""
-    if camada_activa and _cierre_oficial_mes(camada_activa) is None:
-        focos_abiertos["B1"] = camada_activa
+    camadas_abiertas = _camadas_b1_abiertas()
 
-    cortes = _cortes_visibles(request.user, carga_kpi=ultima).filter(
-        venta__ejecutivo__tipo_kpi=Ejecutivo.TipoKPI.REGULAR
+    cortes = _cortes_visibles(request.user).filter(
+        boleta=Corte.Boleta.B1,
+        mes_ano__in=camadas_abiertas,
     )
-    if focos_abiertos:
-        data = resumen_accionables(cortes, focos=focos_abiertos)
-    else:
-        data = resumen_accionables(cortes.none(), focos={})
-    data["focos"] = focos_abiertos
+    data = resumen_accionables(cortes, focos={}) if camadas_abiertas else resumen_accionables(cortes.none(), focos={})
+    data["focos"] = {"B1": camadas_abiertas[0]} if camadas_abiertas else {}
+    data["camadas_abiertas"] = camadas_abiertas
     data["snapshot"] = {
         "archivo_nombre": ultima.archivo_nombre,
+        "fecha_reporte": (fecha_reporte_desde_nombre(ultima.archivo_nombre).isoformat() if ultima and fecha_reporte_desde_nombre(ultima.archivo_nombre) else None),
         "fecha_corte": ultima.fecha_corte.isoformat() if ultima and ultima.fecha_corte else None,
         "dia_reporte": ultima.dia_reporte,
     } if ultima else None
@@ -1995,8 +2323,9 @@ def dashboard_accionables(request):
 @permission_classes([PuedeHistorico])
 def dashboard_historico(request):
     """
-    GET /api/dashboard/historico/ -- pantalla 'Histórico': comparativo
+    GET /api/dashboard/historico/ -- pantalla 'HistÃ³rico': comparativo
     mes a mes de ventas cargadas y su estado de pago, para ver la
     tendencia (este mes vs. el anterior, etc). Mismo alcance por rol.
     """
     return Response({"camadas": resumen_historico_camadas(_ventas_visibles(request.user))})
+

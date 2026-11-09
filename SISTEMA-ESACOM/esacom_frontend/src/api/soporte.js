@@ -5,6 +5,29 @@ export async function fetchUsuarios(params = {}) {
   return data;
 }
 
+export async function descargarInformeAccesos(params = {}) {
+  const respuesta = await client.get(
+    "/soporte/usuarios/descargar-accesos/",
+    {
+      params,
+      responseType: "blob",
+    }
+  );
+
+  const url = window.URL.createObjectURL(respuesta.data);
+  const enlace = document.createElement("a");
+
+  enlace.href = url;
+  enlace.download = "esacom_ultimos_accesos.csv";
+  document.body.appendChild(enlace);
+  enlace.click();
+  enlace.remove();
+
+  window.setTimeout(() => {
+    window.URL.revokeObjectURL(url);
+  }, 1000);
+}
+
 export async function fetchResumenUsuarios() {
   const { data } = await client.get("/soporte/usuarios/resumen/");
   return data;

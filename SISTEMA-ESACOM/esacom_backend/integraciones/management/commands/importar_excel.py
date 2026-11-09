@@ -310,8 +310,6 @@ class Command(BaseCommand):
         # Reconciliación completa de asignaciones. Cero substring matching.
         sin_match = 0
         cambios_supervisor = 0
-        detalle_supervisor_sin_match = []
-
         for ejecutivo, alias in pendientes_supervisor:
             anterior_id = ejecutivo.supervisor_id
             nuevo = None
@@ -321,12 +319,6 @@ class Command(BaseCommand):
                     nuevo = Ejecutivo.objects.filter(rut=EjecutivoManager.normalize_rut(rut_sup), cargo=Ejecutivo.Cargo.SUPERVISOR).first()
                 if not nuevo:
                     sin_match += 1
-                    detalle_supervisor_sin_match.append({
-                        "rut": ejecutivo.rut,
-                        "nombre": ejecutivo.nombre,
-                        "supervisor_fuente": ejecutivo.supervisor_fuente,
-                        "alias_normalizado": alias,
-                    })
             if anterior_id != (nuevo.id if nuevo else None):
                 anterior = Ejecutivo.objects.filter(pk=anterior_id).first() if anterior_id else None
                 ejecutivo.supervisor = nuevo
@@ -343,29 +335,13 @@ class Command(BaseCommand):
                     },
                 )
 
-        activos_no_en_archivo = list(
-            Ejecutivo.objects.filter(is_active=True)
-            .exclude(rut__in=ruts_en_archivo)
-            .values_list("rut", "nombre")
-        )
-
-        alias_no_resueltos = sorted({
-            detalle["alias_normalizado"]
-            for detalle in detalle_supervisor_sin_match
-            if detalle["alias_normalizado"]
-        })
-
+        activos_no_en_archivo = list(Ejecutivo.objects.filter(is_active=True).exclude(rut__in=ruts_en_archivo).values_list("rut", "nombre"))
+        alias_no_resueltos = sorted({alias for _, alias in pendientes_supervisor if alias and alias not in supervisor_por_alias})
         return {
-            "creados": creados,
-            "actualizados": actualizados,
-            "supervisor_sin_match": sin_match,
-            "cambios_supervisor": cambios_supervisor,
+            "creados": creados, "actualizados": actualizados,
+            "supervisor_sin_match": sin_match, "cambios_supervisor": cambios_supervisor,
             "alias_supervisor_no_resueltos": alias_no_resueltos,
-            "detalle_supervisor_sin_match": detalle_supervisor_sin_match,
-            "activos_no_en_archivo": [
-                f"{rut} {nombre}"
-                for rut, nombre in activos_no_en_archivo
-            ],
+            "activos_no_en_archivo": [f"{rut} {nombre}" for rut, nombre in activos_no_en_archivo],
         }
 
     # ------------------------------------------------------------------
@@ -1152,7 +1128,11 @@ class Command(BaseCommand):
         creadas = actualizadas = sin_ejecutivo = 0
         for row in ws.iter_rows(min_row=2):
             rut_cliente = _normalizar_rut_valor(valor(row, mapa, "RUT CLIENTE"))
-            nombre_evt = str(valor(row, mapa, "NOMBRE EVT") or "").strip()
+            nombre_evt = str(
+                valor(row, mapa, "NOMBRE EVT")
+                or valor(row, mapa, "NOMBRE EJECUTIVO")
+                or ""
+            ).strip()
             rut_evt = _normalizar_rut_valor(valor(row, mapa, "RUT EVT"))
             pcs = _limpiar_pcs(valor(row, mapa, "PCS"))
             fecha_venta = a_fecha(valor(row, mapa, "FECHA VENTA"))

@@ -21,6 +21,7 @@ import Permisos from "./pages/Permisos";
 import PortalOperaciones from "./pages/PortalOperaciones";
 import PortalContabilidad from "./pages/PortalContabilidad";
 import EstadoSistema from "./pages/EstadoSistema";
+import AuditoriaRRHH from "./pages/AuditoriaRRHH";
 import SinAcceso from "./pages/SinAcceso";
 
 function RaizSegunSesion() {
@@ -163,6 +164,7 @@ export default function App() {
 
           <Route path="/permisos" element={<RutaProtegida cargosPermitidos={["SOPORTE","GERENCIA"]} permisoRequerido="permisos"><Permisos /></RutaProtegida>} />
           <Route path="/estado-sistema" element={<RutaProtegida cargosPermitidos={["SOPORTE","GERENCIA"]} permisoRequerido="estado_sistema"><EstadoSistema /></RutaProtegida>} />
+          <Route path="/auditoria-rrhh" element={<RutaProtegida cargosPermitidos={["SOPORTE","GERENCIA"]} permisoRequerido="permisos"><AuditoriaRRHH /></RutaProtegida>} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

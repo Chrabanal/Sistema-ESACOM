@@ -3,6 +3,7 @@ from rest_framework import serializers
 from usuarios.serializers import EjecutivoResumenSerializer
 
 from .models import CargaExcel, ClaroImport, KPIRegistro, MetaKPICalidad
+from .report_dates import fecha_reporte_desde_nombre
 
 
 class ClaroImportSerializer(serializers.ModelSerializer):
@@ -74,6 +75,11 @@ class KPIRegistroSerializer(serializers.ModelSerializer):
 
 class CargaExcelSerializer(serializers.ModelSerializer):
     creado_por = EjecutivoResumenSerializer(read_only=True)
+    fecha_reporte = serializers.SerializerMethodField()
+
+    def get_fecha_reporte(self, obj):
+        fecha = fecha_reporte_desde_nombre(obj.archivo_nombre)
+        return fecha.isoformat() if fecha else None
 
     class Meta:
         model = CargaExcel
@@ -82,6 +88,7 @@ class CargaExcelSerializer(serializers.ModelSerializer):
             "origen",
             "tipo_base",
             "archivo_nombre",
+            "fecha_reporte",
             "fecha_corte",
             "dia_reporte",
             "estado_reporte",

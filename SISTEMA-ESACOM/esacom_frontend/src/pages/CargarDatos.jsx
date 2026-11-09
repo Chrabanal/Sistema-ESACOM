@@ -21,7 +21,7 @@ export default function CargarDatos() {
   const [error, setError] = useState("");
   const [historial, setHistorial] = useState(null);
   const [fechaCorte, setFechaCorte] = useState("");
-  const [diaReporte, setDiaReporte] = useState("MIERCOLES");
+  const [diaReporte, setDiaReporte] = useState("OTRO");
   const [formatoKpi, setFormatoKpi] = useState("DETALLADO");
   const [avanceB1, setAvanceB1] = useState("");
   const [avanceB2, setAvanceB2] = useState("");
@@ -155,6 +155,7 @@ export default function CargarDatos() {
               >
                 <option value="LUNES">Lunes</option>
                 <option value="MIERCOLES">Miércoles</option>
+                <option value="JUEVES">Jueves</option>
                 <option value="OTRO">Otro</option>
               </select>
             </div>
@@ -301,6 +302,29 @@ export default function CargarDatos() {
               </div>
             )}
 
+            {resultado.proteccion_cierres && (
+              <div className="mb-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-900">
+                <p className="font-semibold">✓ Protección automática de histórico activa</p>
+                <p className="mt-1 text-xs leading-relaxed text-blue-800">
+                  El archivo traía <strong>{resultado.filas_archivo ?? 0}</strong> filas de negocio. El sistema procesó
+                  <strong> {resultado.filas_importadas ?? resultado.filas_leidas ?? 0}</strong> y protegió los meses cerrados sin modificarlos.
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                  <span className="rounded-full bg-white px-2 py-1">
+                    Cerradas ignoradas: <strong>{resultado.filas_ignoradas_cierre ?? 0}</strong>
+                  </span>
+                  <span className="rounded-full bg-white px-2 py-1">
+                    Previas a {resultado.mes_inicio_kpi || "2026-07"}: <strong>{resultado.filas_ignoradas_fuera_alcance ?? 0}</strong>
+                  </span>
+                  {(resultado.camadas_cerradas_protegidas || []).length > 0 && (
+                    <span className="rounded-full bg-white px-2 py-1">
+                      Meses protegidos: <strong>{resultado.camadas_cerradas_protegidas.join(", ")}</strong>
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
             {"coincidencias" in resultado && (
               <>
                 <div
@@ -401,7 +425,8 @@ export default function CargarDatos() {
                     <div>{c.archivo_nombre}</div>
                     {c.fecha_corte && (
                       <>
-                        <div className="text-[10px] text-gray-400">Corte: {c.fecha_corte} · {c.dia_reporte || "—"}</div>
+                        {c.fecha_reporte && <div className="text-[10px] text-gray-400">Reporte Claro: {c.fecha_reporte}</div>}
+                        <div className="text-[10px] text-gray-400">Corte de pagos: {c.fecha_corte} · Día reporte: {c.dia_reporte || "—"}</div>
                         <div className="text-[10px] text-gray-400">
                           Formato: {c.formato_kpi === "AVANCE_MOVIL"
                             ? "Avance Claro Móvil"
