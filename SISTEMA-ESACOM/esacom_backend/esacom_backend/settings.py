@@ -194,6 +194,12 @@ GOOGLE_SHEETS_SPREADSHEET_ID = env('GOOGLE_SHEETS_SPREADSHEET_ID', default='')
 GOOGLE_SERVICE_ACCOUNT_FILE = env('GOOGLE_SERVICE_ACCOUNT_FILE', default='')
 GOOGLE_SHEETS_SYNC_MINUTES = env.int('GOOGLE_SHEETS_SYNC_MINUTES', default=5)
 
+# Recursos Humanos ESACOM (R2.13): fuente separada de Base de Ventas.
+# En local puede apuntar a /app/data/recursos_humanos.xlsx; en servidor
+# puede configurarse el ID Drive/Sheets compartido con la misma cuenta de servicio.
+GOOGLE_HR_SPREADSHEET_ID = env('GOOGLE_HR_SPREADSHEET_ID', default='')
+HR_LOCAL_XLSX = env('HR_LOCAL_XLSX', default='')
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators

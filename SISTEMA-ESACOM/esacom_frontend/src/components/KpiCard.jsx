@@ -44,7 +44,7 @@ export default function KpiCard({ corte }) {
     meta_pct = 0, pct_cumplimiento = 0, pct_proyectado = 0,
     faltan_para_meta = 0, semaforo = "sin_datos", unidad = "RGU", fuera_medicion = 0, gestion = {},
     tiene_datos, estado_medicion = "AVANCE", estado_mes = "EN_CURSO", valor_informado_claro = null, tendencia_pp = null,
-    dia_reporte = "", fecha_corte = null, meta_definida = true, perfil_kpi = "REGULAR",
+    dia_reporte = "", fecha_reporte = null, fecha_corte = null, meta_definida = true, perfil_kpi = "REGULAR",
   } = corte;
 
   const sinDatos = tiene_datos === false || (!Number(corte.total || 0) && !Number(sin_boleta || 0) && !Number(fuera_medicion || 0));
@@ -122,7 +122,7 @@ export default function KpiCard({ corte }) {
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>
                 <p className="font-semibold text-gray-700">Último reporte Claro</p>
-                {(dia_reporte || fecha_corte) && <p className="mt-0.5 text-gray-400">{dia_reporte || "Reporte"}{fecha_corte ? ` · corte ${fecha_corte}` : ""}</p>}
+                {(fecha_reporte || dia_reporte || fecha_corte) && <p className="mt-0.5 text-gray-400">{fecha_reporte ? `Reporte ${fecha_reporte}` : (dia_reporte || "Reporte")}{fecha_corte ? ` · corte ${fecha_corte}` : ""}</p>}
               </div>
               <Tendencia valor={tendencia_pp} />
             </div>

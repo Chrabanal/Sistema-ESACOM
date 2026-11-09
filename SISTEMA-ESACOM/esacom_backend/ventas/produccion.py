@@ -98,6 +98,42 @@ def _nombre_ejecutivo_movil(venta: VentaMovil) -> str:
     return (venta.nombre_evt or (venta.ejecutivo.nombre if venta.ejecutivo else "") or "SIN EJECUTIVO").strip()
 
 
+def _supervisor_fuente_coincide(valor_fuente: str, supervisor) -> bool:
+    """Indica si la etiqueta SUPERVISOR de ESACOM corresponde al usuario CRM.
+
+    La fuente suele abreviar el nombre (por ejemplo ``Charly Estay`` frente a
+    ``CHARLY FABIAN ESTAY LAZO``). Para el control operativo la propiedad la
+    define la hoja vigente, por lo que aceptamos cuando todos los tokens de la
+    etiqueta fuente están contenidos en el nombre del Supervisor CRM.
+    """
+    fuente = set(_norm(valor_fuente).split())
+    nombre = set(_norm(getattr(supervisor, "nombre", "")).split())
+    return bool(fuente and nombre and (fuente.issubset(nombre) or nombre.issubset(fuente)))
+
+
+def _filtrar_equipo_por_supervisor_fuente(qs, supervisor):
+    """Aplica al control operativo el agrupamiento de SUPERVISOR de ESACOM.
+
+    No depende de ``ejecutivo__is_active``: si la matriz vigente conserva una
+    fila bajo el Supervisor, esa fila debe seguir visible en el control diario.
+    La producción propia del Supervisor se excluye aquí porque el portal la
+    consulta por separado con ``ejecutivo=supervisor``.
+    """
+    etiquetas = [
+        valor
+        for valor in qs.exclude(supervisor_fuente__isnull=True)
+        .exclude(supervisor_fuente="")
+        .values_list("supervisor_fuente", flat=True)
+        .distinct()
+        if _supervisor_fuente_coincide(valor, supervisor)
+    ]
+    if etiquetas:
+        return qs.filter(supervisor_fuente__in=etiquetas).exclude(ejecutivo=supervisor)
+
+    # Compatibilidad para bases antiguas todavía sin supervisor_fuente.
+    return qs.filter(ejecutivo__supervisor=supervisor).exclude(ejecutivo=supervisor)
+
+
 def _bucket_fijo():
     # Estas claves representan RGU; las cantidades de filas usan el prefijo ``ventas_``.
     return {
@@ -248,8 +284,15 @@ def _sumar_movil(bucket: dict, venta: VentaMovil):
         bucket["pendiente_sin_evidencia"] += 1
 
 
-def resumen_produccion_actual(*, ejecutivo=None) -> dict:
-    """Resumen de las hojas ESACOM vigentes para un vendedor o global."""
+def resumen_produccion_actual(*, ejecutivo=None, supervisor=None) -> dict:
+    """Resumen operativo de las hojas ESACOM vigentes.
+
+    Sin filtros devuelve el control global. ``ejecutivo`` limita a la producción
+    propia de una persona y ``supervisor`` reproduce el equipo informado por
+    ``SUPERVISOR`` en la fuente ESACOM vigente, incluso si un ejecutivo ya está
+    inactivo en el login. La producción propia del Supervisor se consulta
+    por separado pasando ``ejecutivo=supervisor`` para no mezclarla con su equipo.
+    """
     # La producción fija se calcula desde la granularidad real de la hoja
     # ``Base de Ventas``. Un mismo N° PEDIDO puede ocupar más de una fila y
     # cada fila aporta su propio RGU/estado, exactamente como el pivot de
@@ -265,9 +308,19 @@ def resumen_produccion_actual(*, ejecutivo=None) -> dict:
         ).select_related("ejecutivo", "ejecutivo__supervisor")
 
     moviles = VentaMovil.objects.filter(en_base_vigente=True).select_related("ejecutivo", "ejecutivo__supervisor")
+    if ejecutivo is not None and supervisor is not None:
+        raise ValueError("Use ejecutivo o supervisor, no ambos")
     if ejecutivo is not None:
         fijas = fijas.filter(ejecutivo=ejecutivo)
         moviles = moviles.filter(ejecutivo=ejecutivo)
+    elif supervisor is not None:
+        # El control operativo reproduce la propiedad informada en la fuente
+        # ESACOM vigente, no la dotación activa del login. Esto evita perder
+        # ventas vigentes de un ejecutivo que hoy figure inactivo. La producción
+        # propia del Supervisor permanece separada y se consulta con
+        # ``ejecutivo=supervisor``.
+        fijas = _filtrar_equipo_por_supervisor_fuente(fijas, supervisor)
+        moviles = _filtrar_equipo_por_supervisor_fuente(moviles, supervisor)
 
     fija = _bucket_fijo()
     for venta in fijas.iterator():
@@ -282,20 +335,64 @@ def resumen_produccion_actual(*, ejecutivo=None) -> dict:
         "corte": "BASE_VIGENTE",
         "fija": fija,
         "movil": movil,
-        # Control manual: RGU fija completada/pendiente instalación + líneas
-        # móviles efectivamente activadas/portadas.
+        # Claves explícitas para UI: no mezclar RGU Fijo con líneas Móvil en un
+        # mismo número. ``total_produccion`` se conserva solo por compatibilidad.
+        "rgu_fijo_control": fija["total_control"],
+        "rgu_fijo_completados": fija["completadas"],
+        "rgu_fijo_pendiente_instalacion": fija["pendiente_instalacion"],
+        "rgu_fijo_pendiente_comercial": fija["pendiente_comercial"],
+        "rgu_fijo_anulados": fija["anuladas"],
+        "kpi_movil_portadas": movil["portadas"],
+        "movil_principal": movil["principal"],
+        "movil_adicional": movil["adicional"],
+        "movil_pendiente_activacion": movil["pendiente_activacion"],
         "total_produccion": fija["total_control"] + movil["total"],
         "disponible": bool(fija["total_base_vigente"] or movil["total_base_vigente"]),
     }
 
 
 
-def resumen_produccion_mes(*, mes: str, ejecutivo=None, supervisor=None) -> dict:
-    """Producción ESACOM de una camada calendario concreta (YYYY-MM).
+def resumen_movil_vigente_por_supervisor() -> dict[str, dict]:
+    """Distribución de portadas móviles efectivas según SUPERVISOR fuente.
 
-    Se usa en el Portal Ejecutivo para que los KPI comerciales Fijo y Móvil
-    representen el mes seleccionado y no el acumulado histórico. Mantiene la
-    misma clasificación operacional que ``resumen_produccion_actual``.
+    Reproduce el agrupamiento del control diario de Gerencia. Es importante
+    usar ``supervisor_fuente`` porque una venta propia de un usuario con cargo
+    SUPERVISOR no tiene ``ejecutivo.supervisor_id`` (ni debe tenerlo).
+    """
+    resultado = defaultdict(lambda: {"principal": 0, "adicional": 0, "total": 0})
+    qs = VentaMovil.objects.filter(en_base_vigente=True).select_related(
+        "ejecutivo", "ejecutivo__supervisor"
+    )
+    for venta in qs.iterator():
+        efectiva, _ = clasificar_movil_produccion(venta)
+        if not efectiva or venta.tipo_linea not in (
+            VentaMovil.TipoLinea.PRINCIPAL,
+            VentaMovil.TipoLinea.ADICIONAL,
+        ):
+            continue
+        supervisor = _nombre_supervisor_movil(venta)
+        if venta.tipo_linea == VentaMovil.TipoLinea.PRINCIPAL:
+            resultado[supervisor]["principal"] += 1
+        else:
+            resultado[supervisor]["adicional"] += 1
+        resultado[supervisor]["total"] += 1
+    return dict(resultado)
+
+
+def resumen_produccion_mes(*, mes: str, ejecutivo=None, supervisor=None, movil_vigente_actual: bool = False) -> dict:
+    """Producción ESACOM para el período operativo solicitado.
+
+    Fijo se mantiene estrictamente en la camada calendario ``mes``. Para Móvil
+    existen dos lecturas explícitas:
+
+    * ``movil_vigente_actual=False``: respeta la camada/fecha del mes pedido.
+    * ``movil_vigente_actual=True``: usa toda la hoja móvil vigente y aplica la
+      clasificación de línea efectiva (PORTADO/activado). Esta es la lectura
+      operacional del control diario de Gerencia y puede incluir portadas
+      vendidas a fines del mes anterior que siguen vigentes/efectivas hoy.
+
+    ESACOM continúa siendo la única fuente operacional; Claro no participa en
+    esta selección.
     """
     import re
     from django.db.models import Q
@@ -318,10 +415,13 @@ def resumen_produccion_mes(*, mes: str, ejecutivo=None, supervisor=None) -> dict
             camada=mes,
         ).select_related("ejecutivo", "ejecutivo__supervisor")
 
-    moviles = VentaMovil.objects.filter(en_base_vigente=True).filter(
-        Q(camada=mes)
-        | Q(camada="", fecha_venta__year=anio, fecha_venta__month=numero_mes)
-    ).select_related("ejecutivo", "ejecutivo__supervisor")
+    moviles = VentaMovil.objects.filter(en_base_vigente=True)
+    if not movil_vigente_actual:
+        moviles = moviles.filter(
+            Q(camada=mes)
+            | Q(camada="", fecha_venta__year=anio, fecha_venta__month=numero_mes)
+        )
+    moviles = moviles.select_related("ejecutivo", "ejecutivo__supervisor")
 
     if ejecutivo is not None and supervisor is not None:
         raise ValueError("Use ejecutivo o supervisor, no ambos")
@@ -387,6 +487,8 @@ def resumen_produccion_mes(*, mes: str, ejecutivo=None, supervisor=None) -> dict
         "rgu_fijo_completados": fija["completadas"],
         "rgu_fijo_pendiente_instalacion": fija["pendiente_instalacion"],
         "kpi_movil_portadas": movil["portadas"],
+        "movil_modo": "BASE_VIGENTE_EFECTIVA" if movil_vigente_actual else "MES",
+        "movil_vigente_actual": bool(movil_vigente_actual),
         "total_produccion": rgu_vendidos + movil["portadas"],
         "disponible": bool(fija["total_base_vigente"] or movil["total_base_vigente"]),
     }

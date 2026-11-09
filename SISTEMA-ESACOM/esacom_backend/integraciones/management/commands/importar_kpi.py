@@ -29,7 +29,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Q
 
-from integraciones.models import CargaExcel, KPIRegistro
+from integraciones.models import CargaExcel, KPIRegistro, KPICierreFijoFila
 from usuarios.models import Ejecutivo
 from ventas.models import Corte, Venta
 
@@ -43,6 +43,45 @@ KPI_A_ESTADO = {
 }
 
 N_BOLETA_A_CORTE = {1: Corte.Boleta.B1, 2: Corte.Boleta.B2, 3: Corte.Boleta.B3}
+
+# El Sistema ESACOM comenzó su histórico KPI operativo en julio 2026.
+# Los reportes de Claro son acumulativos y pueden seguir trayendo meses
+# anteriores; un AVANCE no debe reabrirlos ni mostrarlos como vigentes.
+MES_INICIO_KPI = "2026-07"
+
+
+def camadas_cerradas_fijo() -> set[tuple[str, str]]:
+    """Protege únicamente las combinaciones CAMADA + BOLETA
+    que cuentan con un cierre fijo oficial.
+    """
+    cierres = CargaExcel.objects.filter(
+        tipo_base=CargaExcel.TipoBase.REPORTE_KPI,
+        estado_reporte=CargaExcel.EstadoReporte.CIERRE,
+        formato_kpi=CargaExcel.FormatoKPI.CIERRE_FIJO,
+    )
+
+    cerradas: set[tuple[str, str]] = set()
+
+    for b1, b2, b3 in cierres.values_list(
+        "foco_b1", "foco_b2", "foco_b3"
+    ):
+        for boleta, camada in (
+            ("B1", b1), ("B2", b2), ("B3", b3)
+        ):
+            if camada and str(camada).strip():
+                cerradas.add((str(camada).strip(), boleta))
+
+    filas = KPICierreFijoFila.objects.filter(
+        carga__in=cierres
+    ).exclude(camada="").values_list(
+        "camada", "boleta"
+    ).distinct()
+
+    for camada, boleta in filas:
+        if camada and boleta:
+            cerradas.add((str(camada).strip(), str(boleta).strip()))
+
+    return cerradas
 
 
 def normalizar(texto) -> str:
@@ -218,7 +257,7 @@ class Command(BaseCommand):
         parser.add_argument("--usuario-rut", type=str, default="")
         parser.add_argument("--archivo-nombre", type=str, default="")
         parser.add_argument("--fecha-corte", type=str, default="", help="Fecha de corte Claro, AAAA-MM-DD.")
-        parser.add_argument("--dia-reporte", type=str, default="", help="LUNES / MIERCOLES / OTRO.")
+        parser.add_argument("--dia-reporte", type=str, default="", help="LUNES / MIERCOLES / JUEVES / OTRO.")
 
     def handle(self, *args, **options):
         path = options["archivo"]
@@ -287,6 +326,18 @@ class Command(BaseCommand):
                 "ejecutivo_id",
                 "ejecutivo_ce_id",
                 "conflicto_fuente",
+                "estado_instalacion",
+                "rut_evt",
+                "nombre_evt",
+                "supervisor_fuente",
+                "ejecutivo__rut",
+                "ejecutivo__nombre",
+                "ejecutivo__tipo_kpi",
+                "ejecutivo__cargo",
+                "ejecutivo__is_active",
+                "ejecutivo__supervisor_id",
+                "ejecutivo__supervisor__rut",
+                "ejecutivo__supervisor__nombre",
             )
         }
 
@@ -309,7 +360,14 @@ class Command(BaseCommand):
             )
         }
 
+        # ``filas_archivo`` conserva cuántas filas de negocio venían en el XLSX.
+        # ``total_leidas`` pasa a representar solo las filas que el CRM permitió
+        # procesar después de aplicar la protección automática de históricos.
+        filas_archivo = len(filas)
         total_leidas = 0
+        filas_ignoradas_cierre = 0
+        filas_ignoradas_fuera_alcance = 0
+        ignoradas_cierre_por_camada: dict[str, int] = {}
         coincidencias = 0
         creados = 0
         actualizados = 0
@@ -358,6 +416,16 @@ class Command(BaseCommand):
                     dia_reporte=dia_reporte if dia_reporte in CargaExcel.DiaReporte.values else "",
                 )
 
+            proteger_historico = bool(
+                (dry_run and carga is None)
+                or (
+                    carga
+                    and carga.estado_reporte == CargaExcel.EstadoReporte.AVANCE
+                    and carga.formato_kpi == CargaExcel.FormatoKPI.DETALLADO
+                )
+            )
+            camadas_cerradas = camadas_cerradas_fijo() if proteger_historico else set()
+
             meta_por_boleta = {
                 "B1": getattr(carga, "meta_b1", None) if carga else None,
                 "B2": getattr(carga, "meta_b2", None) if carga else None,
@@ -400,19 +468,37 @@ class Command(BaseCommand):
             }
 
             for row in filas:
-                total_leidas += 1
-                if limite and total_leidas > limite:
-                    total_leidas -= 1
-                    break
-
                 num_pedido = str(campo(row, "NUM_PEDIDO") or "").strip()
                 camada = camada_a_mes_ano(campo(row, "CAMADA"))
                 n_boleta = a_entero(campo(row, "N_BOLETA"))
                 boleta = N_BOLETA_A_CORTE.get(n_boleta)
 
                 if not num_pedido or not camada or not boleta:
+                    total_leidas += 1
                     filas_malformadas += 1
                     continue
+
+                # Protección automática para los XLSX acumulativos de Claro.
+                # Un AVANCE puede traer nuevamente B1/B2/B3 de meses antiguos:
+                # - antes de julio 2026 quedan fuera del alcance ESACOM;
+                # - una camada con CIERRE_FIJO nunca se vuelve a escribir.
+                # Los meses todavía abiertos sí continúan actualizándose aunque
+                # ya no sean el foco principal del correo/reporte.
+                if proteger_historico:
+                    if camada < MES_INICIO_KPI:
+                        filas_ignoradas_fuera_alcance += 1
+                        continue
+                    if (camada, boleta) in camadas_cerradas:
+                        filas_ignoradas_cierre += 1
+                        ignoradas_cierre_por_camada[camada] = (
+                            ignoradas_cierre_por_camada.get(camada, 0) + 1
+                        )
+                        continue
+
+                total_leidas += 1
+                if limite and total_leidas > limite:
+                    total_leidas -= 1
+                    break
 
                 clave_archivo = (num_pedido, camada, boleta)
                 if clave_archivo in vistos_archivo:
@@ -564,6 +650,26 @@ class Command(BaseCommand):
                         for i in range(min(len(headers), len(row)))
                         if headers[i]
                     }
+                    snapshot_esacom = None
+                    if venta:
+                        snapshot_esacom = {
+                            "venta_id": venta.get("id"),
+                            "estado_instalacion": venta.get("estado_instalacion") or "",
+                            "conflicto_fuente": bool(venta.get("conflicto_fuente")),
+                            "rgu": venta.get("rgu_base"),
+                            "rut_evt": venta.get("rut_evt") or "",
+                            "nombre_evt": venta.get("nombre_evt") or "",
+                            "supervisor_fuente": venta.get("supervisor_fuente") or "",
+                            "ejecutivo_id": venta.get("ejecutivo_id"),
+                            "ejecutivo_rut": venta.get("ejecutivo__rut") or "",
+                            "ejecutivo_nombre": venta.get("ejecutivo__nombre") or "",
+                            "tipo_kpi": venta.get("ejecutivo__tipo_kpi") or "",
+                            "cargo": venta.get("ejecutivo__cargo") or "",
+                            "ejecutivo_activo": bool(venta.get("ejecutivo__is_active")),
+                            "supervisor_id": venta.get("ejecutivo__supervisor_id"),
+                            "supervisor_rut": venta.get("ejecutivo__supervisor__rut") or "",
+                            "supervisor_nombre": venta.get("ejecutivo__supervisor__nombre") or "",
+                        }
                     buffer_kpi.append(
                         KPIRegistro(
                             carga_id=carga.id,
@@ -597,6 +703,7 @@ class Command(BaseCommand):
                             diferencia_rgu=dif_rgu,
                             diferencia_propietario=dif_propietario,
                             ejecutivo_kpi_no_resuelto=ejecutivo_no_resuelto,
+                            snapshot_esacom=snapshot_esacom,
                             raw_data=raw,
                         )
                     )
@@ -626,7 +733,10 @@ class Command(BaseCommand):
                     | Q(diferencia_estado=True)
                     | Q(ejecutivo_kpi_no_resuelto=True)
                 ).count()
-                carga.filas_totales = total_leidas
+                # El total persistido representa lo que realmente quedó
+                # importado en esta carga, no las filas acumulativas que el
+                # sistema protegió/ignoró.
+                carga.filas_totales = KPIRegistro.objects.filter(carga=carga).count()
                 carga.filas_sin_cruce = sin_venta
                 carga.filas_con_error = filas_inconsistentes + filas_malformadas
                 carga.save(update_fields=["filas_totales", "filas_sin_cruce", "filas_con_error"])
@@ -651,8 +761,22 @@ class Command(BaseCommand):
 
         wb.close()
 
+        filas_importadas = (
+            KPIRegistro.objects.filter(carga=carga).count()
+            if carga is not None and not dry_run
+            else max(0, total_leidas - filas_malformadas - duplicadas_archivo)
+        )
+
         resumen = {
+            "filas_archivo": filas_archivo,
             "filas_leidas": total_leidas,
+            "filas_importadas": filas_importadas,
+            "proteccion_cierres": bool(proteger_historico),
+            "filas_ignoradas_cierre": filas_ignoradas_cierre,
+            "filas_ignoradas_fuera_alcance": filas_ignoradas_fuera_alcance,
+            "camadas_cerradas_protegidas": [f"{m}/{b}" for m, b in sorted(camadas_cerradas)],
+            "ignoradas_cierre_por_camada": dict(sorted(ignoradas_cierre_por_camada.items())),
+            "mes_inicio_kpi": MES_INICIO_KPI,
             "coincidencias": coincidencias,
             "cortes_creados": creados,
             "cortes_actualizados": actualizados,
@@ -680,7 +804,8 @@ class Command(BaseCommand):
         }
 
         self.stdout.write(self.style.SUCCESS(
-            f"Filas: {total_leidas} | Cruces: {coincidencias} | "
+            f"Archivo: {filas_archivo} | Procesadas: {total_leidas} | Cruces: {coincidencias} | "
+            f"Ignoradas cierre: {filas_ignoradas_cierre} | Fuera alcance: {filas_ignoradas_fuera_alcance} | "
             f"Cortes +{creados}/~{actualizados} | Sin venta: {sin_venta} | "
             f"Dif RUT/RGU/CE: {diferencias_rut}/{diferencias_rgu}/{diferencias_propietario}"
         ))

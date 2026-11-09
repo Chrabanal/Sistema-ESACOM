@@ -329,8 +329,13 @@ def sincronizar_base_matriz(*, creado_por=None) -> dict:
         # Auditoría atómica: calculamos la producción DIRECTAMENTE desde el
         # mismo XLSX exacto que se importará a continuación. Esto elimina los
         # falsos DIF cuando la matriz cambia entre dos descargas consecutivas.
-        from integraciones.services.produccion_fuente import calcular_produccion_desde_xlsx, campos
+        from integraciones.services.produccion_fuente import (
+            calcular_produccion_desde_xlsx,
+            campos,
+            leer_resumen_gerencia_desde_xlsx,
+        )
         fuente_directa = calcular_produccion_desde_xlsx(tmp_path)
+        resumen_gerencia_fuente = leer_resumen_gerencia_desde_xlsx(tmp_path)
 
         with transaction.atomic():
             command = ImportarExcelCommand()
@@ -421,6 +426,7 @@ def sincronizar_base_matriz(*, creado_por=None) -> dict:
                     "estado": "OK" if alineado else "ADVERTENCIA",
                     "diferencias": diferencias,
                 },
+                "resumen_gerencia_fuente": resumen_gerencia_fuente,
             })
     
             def contar(d):

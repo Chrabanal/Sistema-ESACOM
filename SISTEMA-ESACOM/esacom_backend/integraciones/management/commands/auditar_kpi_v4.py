@@ -159,7 +159,7 @@ class Command(BaseCommand):
             raise CommandError("--fecha-corte debe ser AAAA-MM-DD") from exc
         dia = str(opts["dia_reporte"] or "OTRO").upper()
         if dia not in CargaExcel.DiaReporte.values:
-            raise CommandError("--dia-reporte debe ser LUNES, MIERCOLES u OTRO")
+            raise CommandError("--dia-reporte debe ser LUNES, MIERCOLES, JUEVES u OTRO")
 
         metadata = _extraer_focos_y_metas_kpi(path)
         focos = {

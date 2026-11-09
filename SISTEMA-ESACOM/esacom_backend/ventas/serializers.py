@@ -7,6 +7,7 @@ from .models import Apelacion, Corte, Gestion, Venta
 
 
 class VentaSerializer(serializers.ModelSerializer):
+    cortes_resumen = serializers.SerializerMethodField()
     ejecutivo = EjecutivoResumenSerializer(read_only=True)
     ejecutivo_ce = EjecutivoResumenSerializer(read_only=True)
     ejecutivo_id = serializers.PrimaryKeyRelatedField(
@@ -24,6 +25,27 @@ class VentaSerializer(serializers.ModelSerializer):
         write_only=True, required=False, allow_null=True,
     )
 
+    def get_cortes_resumen(self, obj):
+        cortes = sorted(
+            obj.cortes.all(),
+            key=lambda c: (c.mes_ano or "", c.boleta or ""),
+        )
+        return [
+            {
+                "id": c.id,
+                "boleta": c.boleta,
+                "mes_ano": c.mes_ano,
+                "estado_pago": c.estado_pago,
+                "estado_calculado": c.estado_calculado,
+                "fecha_vencimiento": c.fecha_vencimiento,
+                "fecha_pago": c.fecha_pago,
+                "fecha_limite_medicion": c.fecha_limite_medicion,
+                "es_medible": c.es_medible,
+                "rgu_kpi": c.rgu_kpi,
+            }
+            for c in cortes
+        ]
+
     class Meta:
         model = Venta
         fields = [
@@ -31,6 +53,7 @@ class VentaSerializer(serializers.ModelSerializer):
             "origen_venta", "fecha_pago_honorarios", "rut_ce", "codigo_ce", "rgu_base", "ejecutivo_ce",
             "ejecutivo", "ejecutivo_id", "promocion", "promocion_id", "comuna", "comuna_id",
             "tipo_cliente", "estado_instalacion", "motivo_pendiente",
+            "cortes_resumen",
             "fecha_venta", "primera_agenda", "segunda_agenda", "fecha_cierre",
             "precio_venta", "honorarios", "ingresador", "camada",
         ]

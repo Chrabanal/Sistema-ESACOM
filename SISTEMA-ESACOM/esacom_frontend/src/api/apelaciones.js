@@ -93,6 +93,54 @@ export async function fetchCortes(params = {}) {
   return data.results ?? data;
 }
 
+/**
+ * Recupera todos los cortes B1 pendientes del período solicitado.
+ * Recorre la paginación del backend sin modificar los permisos por usuario.
+ */
+export async function fetchCortesB1Pendientes(mes) {
+  const filas = [];
+  let pagina = 1;
+  let total = null;
+
+  while (pagina <= 1000) {
+    const { data } = await client.get("/cortes/", {
+      params: {
+        mes_ano: mes,
+        boleta: "B1",
+        estado_pago: "PENDIENTE",
+        page: pagina,
+      },
+    });
+
+    const bloque = Array.isArray(data) ? data : data.results;
+
+    if (!Array.isArray(bloque)) {
+      throw new Error("Respuesta inesperada al consultar cortes B1.");
+    }
+
+    filas.push(...bloque);
+
+    if (Array.isArray(data)) break;
+
+    total = data.count ?? null;
+
+    if (!data.next) {
+      if (total !== null && filas.length < total) {
+        throw new Error("La consulta B1 terminó con registros faltantes.");
+      }
+      break;
+    }
+
+    pagina += 1;
+  }
+
+  if (pagina > 1000) {
+    throw new Error("Se alcanzó el límite de páginas de cortes B1.");
+  }
+
+  return filas;
+}
+
 export async function verificarCorte(id, estadoPago) {
   const { data } = await client.post(`/cortes/${id}/verificar/`, { estado_pago: estadoPago });
   return data;

@@ -1,15 +1,20 @@
+﻿import csv
 import secrets
 import string
 import re
 import unicodedata
 
 from django.db import transaction
+from django.http import HttpResponse
+from django.utils import timezone
+from zoneinfo import ZoneInfo
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import status, viewsets
-from rest_framework.decorators import action
+from rest_framework.decorators import action, api_view, permission_classes, parser_classes
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.tokens import RefreshToken, TokenError
@@ -118,6 +123,74 @@ class UsuarioSoporteViewSet(viewsets.ModelViewSet):
             ids = [u.pk for u in qs if self._coincide_busqueda(u, q)]
             qs = qs.filter(pk__in=ids)
         return qs
+
+
+    @action(detail=False, methods=["get"], url_path="descargar-accesos")
+    def descargar_accesos(self, request):
+        """Exporta el último ingreso de usuarios visibles para Soporte."""
+        zona = ZoneInfo("America/Santiago")
+        ahora = timezone.now()
+
+        respuesta = HttpResponse(
+            content_type="text/csv; charset=utf-8"
+        )
+        respuesta["Content-Disposition"] = (
+            'attachment; filename="esacom_ultimos_accesos.csv"'
+        )
+
+        # BOM UTF-8 para compatibilidad con Excel.
+        respuesta.write("\ufeff")
+        escritor = csv.writer(respuesta, delimiter=";")
+
+        escritor.writerow([
+            "Nombre", "RUT", "Cargo", "Tipo KPI",
+            "Estado", "Supervisor", "Equipo",
+            "Fecha ultimo ingreso", "Hora ultimo ingreso",
+            "Dias sin ingresar",
+        ])
+
+        def texto_seguro(valor):
+            valor = str(valor or "")
+            if valor.lstrip().startswith(("=", "+", "-", "@")):
+                return "'" + valor
+            return valor
+
+        for usuario in self.get_queryset():
+            fecha = ""
+            hora = ""
+            dias = ""
+
+            if usuario.last_login:
+                ingreso = timezone.localtime(usuario.last_login, zona)
+                fecha = ingreso.strftime("%d-%m-%Y")
+                hora = ingreso.strftime("%H:%M:%S")
+                dias = max(
+                    0,
+                    (
+                        timezone.localtime(ahora, zona).date()
+                        - ingreso.date()
+                    ).days,
+                )
+            else:
+                fecha = "Sin ingreso registrado"
+
+            escritor.writerow([
+                texto_seguro(usuario.nombre),
+                texto_seguro(usuario.rut),
+                texto_seguro(usuario.cargo),
+                texto_seguro(usuario.tipo_kpi),
+                "Activo" if usuario.is_active else "Inactivo",
+                texto_seguro(
+                    usuario.supervisor.nombre
+                    if usuario.supervisor else ""
+                ),
+                texto_seguro(usuario.equipo),
+                fecha,
+                hora,
+                dias,
+            ])
+
+        return respuesta
 
     @staticmethod
     def _snapshot(usuario):
@@ -372,3 +445,29 @@ class LogoutView(APIView):
             # Idempotente: un token expirado/ya revocado se considera sesión cerrada.
             pass
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(["GET", "POST"])
+@permission_classes([EsSoporteOGerencia])
+@parser_classes([MultiPartParser, FormParser])
+def auditoria_rrhh_view(request):
+    """Compara RRHH contra CRM sin aplicar ningún cambio.
+
+    POST acepta un XLSX en ``archivo`` para pruebas locales. GET usa la
+    fuente configurada por HR_LOCAL_XLSX o GOOGLE_HR_SPREADSHEET_ID.
+    """
+    from integraciones.services.rrhh import RRHHError, auditar_rrhh
+
+    archivo = request.FILES.get("archivo") if request.method == "POST" else None
+    if archivo and getattr(archivo, "size", 0) > 30 * 1024 * 1024:
+        return Response({"detail": "El XLSX RRHH supera el máximo de 30 MB."}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        return Response(auditar_rrhh(uploaded_file=archivo))
+    except RRHHError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    except Exception as exc:
+        # No exponer trazas ni datos del archivo RRHH al navegador.
+        return Response(
+            {"detail": f"No se pudo auditar Recursos Humanos: {exc.__class__.__name__}"},
+            status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        )

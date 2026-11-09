@@ -171,15 +171,18 @@ export default function DashboardGerencia() {
 
   const filasHistorico = useMemo(() => {
     if (!detalleUsuario) return [];
-    const actual = detalleUsuario.calidad_actual;
     const filas = [];
-    if (actual?.tiene_datos) filas.push({ ...actual, es_actual: true });
+    for (const actual of detalleUsuario.calidad_abierta || (detalleUsuario.calidad_actual ? [detalleUsuario.calidad_actual] : [])) {
+      if (actual?.tiene_datos) filas.push({ ...actual, es_actual: true });
+    }
     for (const item of detalleUsuario.historico_kpi || []) filas.push({ ...item, es_actual: false });
     return filas;
   }, [detalleUsuario]);
 
   const operacion = data?.operacion || {};
   const mesActual = operacion.mes_actual || "";
+  const produccionMes = operacion.produccion_mes || {};
+  const controlOperativo = operacion.control_operativo || {};
 
   return (
     <Layout
@@ -223,25 +226,94 @@ export default function DashboardGerencia() {
 
           <section>
             <div className="mb-3 border-l-4 border-lime-500 pl-3">
-              <h2 className="text-lg font-bold text-gray-900">Operación actual ESACOM · {nombreMes(mesActual)}</h2>
-              <p className="text-xs text-gray-500">Solo datos operacionales del mes vigente; los acumulados quedan en Histórico y Análisis.</p>
+              <h2 className="text-lg font-bold text-gray-900">Producción del mes · {nombreMes(mesActual)}</h2>
+              <p className="text-xs text-gray-500">Solo ventas del mes calendario. Este bloque no se usa para cuadrar el control diario vigente.</p>
             </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-              <TarjetaOperacion label="Clientes actuales" value={numero(operacion.clientes)} detail="Clientes únicos del mes" />
-              <TarjetaOperacion label="RGU Fijo vendidos" value={numero(operacion.rgu_fijo_vendidos)} detail={`${numero(operacion.ventas_fijo)} ventas`} tone="green" />
-              <TarjetaOperacion label="Portadas móviles" value={numero(operacion.movil_portadas)} detail={`Principal ${numero(operacion.movil_principal)} · Adicional ${numero(operacion.movil_adicional)}`} tone="blue" />
-              <TarjetaOperacion label="Instaladas" value={numero(operacion.instaladas)} tone="green" />
-              <TarjetaOperacion label="Pend. instalación" value={numero(operacion.pendiente_instalacion)} tone="orange" />
-              <TarjetaOperacion label="Pend. comercial" value={numero(operacion.pendiente_comercial)} tone="blue" />
-              <TarjetaOperacion label="Ejecutivos activos" value={numero(operacion.ejecutivos_activos)} detail={`${numero(operacion.ejecutivos_regulares_activos)} Regular · ${numero(operacion.ejecutivos_honorarios_activos)} Honorarios`} />
-              <TarjetaOperacion label="Supervisores activos" value={numero(operacion.supervisores_activos)} />
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <TarjetaOperacion label="Clientes del mes" value={numero(operacion.clientes)} detail="Clientes únicos del período" />
+              <TarjetaOperacion label="RGU Fijo vendidos" value={numero(produccionMes.rgu_fijo_vendidos)} detail={`${numero(produccionMes.ventas_fijo)} ventas del mes`} tone="green" />
+              <TarjetaOperacion label="Portadas Móvil del mes" value={numero(produccionMes.movil_portadas)} detail={`Principal ${numero(produccionMes.movil_principal)} · Adicional ${numero(produccionMes.movil_adicional)}`} tone="blue" />
+              <TarjetaOperacion label="RGU Fijo gestionables del mes" value={numero(produccionMes.rgu_fijo_gestionables)} detail={`Anulados ${numero(produccionMes.rgu_fijo_anulados)}`} />
             </div>
           </section>
 
           <section>
             <div className="mb-3 border-l-4 border-lime-500 pl-3">
-              <h2 className="text-lg font-bold text-gray-900">Calidad actual</h2>
-              <p className="text-xs text-gray-500">Último AVANCE Fijo Claro/VTR. No mezcla CIERRE Fijo, CIERRE Móvil ni AVANCE Móvil.</p>
+              <h2 className="text-lg font-bold text-gray-900">Control operativo ESACOM · Hoy</h2>
+              <p className="text-xs text-gray-500">Fotografía vigente para cuadrar con el control diario de Gerencia. Fijo se expresa en RGU y Móvil en líneas efectivas; puede incluir ventas de meses anteriores que siguen activas en la base.</p>
+            </div>
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+              <TarjetaOperacion label="Fijo completado" value={numero(controlOperativo.rgu_completadas)} detail="RGU base vigente" tone="green" />
+              <TarjetaOperacion label="Fijo pend. instalación" value={numero(controlOperativo.rgu_pendiente_instalacion)} detail="RGU base vigente" tone="orange" />
+              <TarjetaOperacion label="Fijo total en control" value={numero(controlOperativo.rgu_total_control)} detail="Completado + pend. instalación" />
+              <TarjetaOperacion label="Portadas móviles vigentes" value={numero(controlOperativo.movil_portadas)} detail={`Principal ${numero(controlOperativo.movil_principal)} · Adicional ${numero(controlOperativo.movil_adicional)}`} tone="blue" />
+              <TarjetaOperacion label="Móvil por activar" value={numero(controlOperativo.movil_pendiente_activacion)} detail="Líneas vigentes no efectivas" />
+              <TarjetaOperacion label="Pend. comercial Fijo" value={numero(controlOperativo.rgu_pendiente_comercial)} detail="RGU fuera del total de instalación" tone="blue" />
+              <TarjetaOperacion label="Ejecutivos activos" value={numero(operacion.ejecutivos_activos)} detail={`${numero(operacion.ejecutivos_regulares_activos)} Regular · ${numero(operacion.ejecutivos_honorarios_activos)} Honorarios`} />
+              <TarjetaOperacion label="Supervisores activos" value={numero(operacion.supervisores_activos)} />
+            </div>
+
+            {Object.keys(controlOperativo.movil_por_supervisor || {}).length > 0 && (
+              <div className="mt-3 rounded-2xl border border-blue-100 bg-blue-50/40 p-4 shadow-sm">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-gray-900">Portadas móviles vigentes por supervisor</p>
+                    <p className="text-xs text-gray-500">Mismo criterio del control diario: línea vigente + efectiva. La producción propia de un Supervisor se agrupa por el supervisor informado por ESACOM.</p>
+                  </div>
+                  <p className="text-xs font-semibold text-blue-700">Total {numero(controlOperativo.movil_portadas)} portadas</p>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                  {Object.entries(controlOperativo.movil_por_supervisor).map(([nombre, datos]) => (
+                    <div key={nombre} className="rounded-xl bg-white px-3 py-2">
+                      <p className="truncate text-[11px] text-gray-500" title={nombre}>{nombre}</p>
+                      <p className="mt-1 text-lg font-black text-blue-800">{numero(datos?.total)}</p>
+                      <p className="text-[10px] text-gray-400">P {numero(datos?.principal)} · A {numero(datos?.adicional)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {Object.keys(controlOperativo.fijo_por_supervisor || {}).length > 0 && (
+              <div className="mt-3 rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-gray-900">Fijo vigente por supervisor</p>
+                    <p className="text-xs text-gray-400">Mismo universo del control diario: completadas + pendiente instalación, expresado en RGU.</p>
+                  </div>
+                  <p className="text-xs text-gray-400">Total control {numero(controlOperativo.rgu_total_control)} RGU</p>
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                  {Object.entries(controlOperativo.fijo_por_supervisor).map(([nombre, datos]) => (
+                    <div key={nombre} className="rounded-xl bg-gray-50 px-3 py-2">
+                      <p className="truncate text-[11px] text-gray-500" title={nombre}>{nombre}</p>
+                      <p className="mt-1 text-lg font-black text-gray-900">{numero(datos?.total_control)}</p>
+                      <p className="text-[10px] text-gray-400">C {numero(datos?.completadas)} · P {numero(datos?.pendiente_instalacion)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
+
+          {(data.calidad_abierta || []).length > 0 && (
+            <section>
+              <div className="mb-3 border-l-4 border-blue-500 pl-3">
+                <h2 className="text-lg font-bold text-gray-900">Camadas B1 abiertas</h2>
+                <p className="text-xs text-gray-500">Todas las camadas Fijo que siguen en AVANCE. Una camada desaparece de esta sección solo cuando existe CIERRE_FIJO oficial.</p>
+              </div>
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {(data.calidad_abierta || []).map((corte) => (
+                  <TarjetaCalidad key={`abierta-${corte.mes_ano}-${corte.boleta}`} corte={corte} referenciaClaro={corte.valor_informado_claro} />
+                ))}
+              </div>
+            </section>
+          )}
+
+          <section>
+            <div className="mb-3 border-l-4 border-lime-500 pl-3">
+              <h2 className="text-lg font-bold text-gray-900">Focos del último reporte Claro</h2>
+              <p className="text-xs text-gray-500">B1/B2/B3 declarados en RESUMEN GESTION RGU. Se mantienen como referencia del correo, pero no ocultan otras camadas presentes en BASE.</p>
             </div>
             <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
               {["B1", "B2", "B3"].map((b) => (
@@ -341,7 +413,7 @@ export default function DashboardGerencia() {
                                 ? "Honorarios · sin meta Regular aplicada"
                                 : `Meta ESACOM ${porcentaje(detalleUsuario.calidad_actual.meta_pct)}`}
                             </p>
-                            <p className="mt-1 text-xs text-gray-500">Referencia Claro {porcentaje(detalleUsuario.calidad_actual.valor_informado_claro)}</p>
+                            <p className="mt-1 text-xs text-gray-500">Referencia Claro {detalleUsuario.calidad_actual.valor_informado_claro == null ? "No informada para esta camada" : porcentaje(detalleUsuario.calidad_actual.valor_informado_claro)}</p>
                           </div>
                           <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
                             {[
@@ -374,9 +446,9 @@ export default function DashboardGerencia() {
                         <p className="mt-2 text-xs text-gray-500">{numero(detalleUsuario.produccion_mes_actual?.ventas_fijo)} ventas · {numero(detalleUsuario.produccion_mes_actual?.rgu_fijo_gestionables)} gestionables · {numero(detalleUsuario.produccion_mes_actual?.rgu_fijo_anulados)} RGU anulados</p>
                       </div>
                       <div className="rounded-xl bg-white p-4">
-                        <p className="text-xs font-bold text-gray-700">Móvil</p>
+                        <p className="text-xs font-bold text-gray-700">Móvil vigente</p>
                         <p className="mt-1 text-3xl font-black text-blue-700">{numero(detalleUsuario.produccion_mes_actual?.kpi_movil_portadas)} <span className="text-sm font-semibold">portadas</span></p>
-                        <p className="mt-2 text-xs text-gray-500">Principal {numero(detalleUsuario.produccion_mes_actual?.movil?.principal)} · Adicional {numero(detalleUsuario.produccion_mes_actual?.movil?.adicional)}</p>
+                        <p className="mt-2 text-xs text-gray-500">Efectivas vigentes · Principal {numero(detalleUsuario.produccion_mes_actual?.movil?.principal)} · Adicional {numero(detalleUsuario.produccion_mes_actual?.movil?.adicional)}</p>
                       </div>
                     </div>
                     {detalleUsuario.usuario.cargo === "SUPERVISOR" && detalleUsuario.equipo && (
@@ -392,7 +464,7 @@ export default function DashboardGerencia() {
             <section>
               <div className="mb-3 border-l-4 border-lime-500 pl-3">
                 <h2 className="text-lg font-bold text-gray-900">Histórico KPI Calidad Fijo</h2>
-                <p className="text-xs text-gray-500">El mes vigente se muestra junto a los meses ya congelados para la persona seleccionada.</p>
+                <p className="text-xs text-gray-500">Las camadas en AVANCE se muestran como En curso; el Histórico queda reservado a CIERRE oficial.</p>
               </div>
               <div className="overflow-x-auto rounded-2xl border border-gray-200 bg-white shadow-sm">
                 <table className="w-full min-w-[760px] text-sm">

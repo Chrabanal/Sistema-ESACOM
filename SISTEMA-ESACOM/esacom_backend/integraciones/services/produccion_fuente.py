@@ -28,6 +28,20 @@ def valor(row, m, nombre, default=""):
     return default if item is None else item
 
 
+def valor_alias(row, m, *nombres, default=""):
+    """Devuelve el primer encabezado alternativo presente en la fuente."""
+    for nombre in nombres:
+        idx = m.get(cabecera(nombre))
+        if idx is not None and idx < len(row):
+            item = row[idx]
+            return default if item is None else item
+    return default
+
+
+def tiene_alias(m, *nombres):
+    return any(cabecera(nombre) in m for nombre in nombres)
+
+
 def rgu(valor_):
     if valor_ in (None, ""):
         return 0
@@ -115,6 +129,130 @@ def _rows_hoja(ws, max_col=None):
         yield valores
 
 
+
+def leer_resumen_gerencia_desde_xlsx(path: str | Path) -> dict:
+    """Lee el control manual vigente de la hoja ``Resumen`` de ESACOM.
+
+    La portada de Gerencia debe poder reproducir la misma tabla dinámica que
+    Operaciones actualiza diariamente. Se localizan los bloques por sus rótulos
+    (no por coordenadas fijas) para tolerar filas/columnas insertadas.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        if "Resumen" not in wb.sheetnames:
+            return {"disponible": False, "motivo": "SIN_HOJA_RESUMEN"}
+
+        rows = list(_rows_hoja(wb["Resumen"], max_col=30))
+
+        def cell(row, idx):
+            return row[idx] if idx < len(row) else None
+
+        def buscar(texto):
+            objetivo = cabecera(texto)
+            for r_idx, row in enumerate(rows):
+                for c_idx, item in enumerate(row):
+                    if cabecera(item) == objetivo:
+                        return r_idx, c_idx
+            return None
+
+        estados = {
+            "ANULADO": "anulado",
+            "COMPLETADA": "completada",
+            "DERIVADO REDES": "derivado_redes",
+            "PENDIENTE COMERCIAL": "pendiente_comercial",
+            "PENDIENTE INSTALACION": "pendiente_instalacion",
+        }
+        ventas_fijas = {k: 0 for k in estados.values()}
+        ventas_fijas["total_rgu"] = 0
+
+        pos = buscar("VENTAS FIJAS")
+        if pos:
+            r0, c0 = pos
+            for row in rows[r0 + 1 : r0 + 20]:
+                etiqueta = cabecera(cell(row, c0))
+                if not etiqueta:
+                    continue
+                if etiqueta == "SUMA TOTAL":
+                    ventas_fijas["total_rgu"] = rgu(cell(row, c0 + 1))
+                    break
+                clave = estados.get(etiqueta)
+                if clave:
+                    ventas_fijas[clave] = rgu(cell(row, c0 + 1))
+
+        completada_por_supervisor = {}
+        for r_idx, row in enumerate(rows):
+            dia_col = None
+            for c_idx, item in enumerate(row):
+                if cabecera(item) == "DIA FIN":
+                    dia_col = c_idx
+                    break
+            if dia_col is None:
+                continue
+            headers = []
+            total_col = None
+            for c_idx in range(dia_col + 1, len(row)):
+                texto = str(cell(row, c_idx) or "").strip()
+                if cabecera(texto) == "SUMA TOTAL":
+                    total_col = c_idx
+                    break
+                if texto:
+                    headers.append((c_idx, texto))
+            if total_col is None or not headers:
+                continue
+            for total_row in rows[r_idx + 1 : r_idx + 40]:
+                if cabecera(cell(total_row, dia_col)) != "SUMA TOTAL":
+                    continue
+                completada_por_supervisor = {
+                    nombre: rgu(cell(total_row, col)) for col, nombre in headers
+                }
+                break
+            if completada_por_supervisor:
+                break
+
+        cruce_claro = {"total": 0, "por_supervisor": {}}
+        pos_cruce = buscar("CRUCE CLARO")
+        if pos_cruce:
+            r0, c0 = pos_cruce
+            # Normalmente la fila siguiente contiene SUPERVISOR / Suma total.
+            header_row_idx = None
+            sup_col = None
+            val_col = None
+            for rr in range(r0, min(r0 + 5, len(rows))):
+                row = rows[rr]
+                for cc, item in enumerate(row):
+                    if cabecera(item) == "SUPERVISOR":
+                        sup_col = cc
+                        header_row_idx = rr
+                    if cabecera(item) == "SUMA TOTAL" and header_row_idx == rr:
+                        val_col = cc
+                if header_row_idx is not None and val_col is not None:
+                    break
+            if header_row_idx is not None and sup_col is not None and val_col is not None:
+                por_sup = {}
+                for row in rows[header_row_idx + 1 : header_row_idx + 30]:
+                    nombre = str(cell(row, sup_col) or "").strip()
+                    etiqueta = cabecera(nombre)
+                    if not etiqueta:
+                        continue
+                    valor_total = rgu(cell(row, val_col))
+                    if etiqueta == "SUMA TOTAL":
+                        cruce_claro["total"] = valor_total
+                        break
+                    por_sup[nombre] = valor_total
+                cruce_claro["por_supervisor"] = por_sup
+
+        disponible = bool(ventas_fijas["total_rgu"] or completada_por_supervisor)
+        return {
+            "disponible": disponible,
+            "ventas_fijas": ventas_fijas,
+            "completada_por_supervisor": completada_por_supervisor,
+            "cruce_claro": cruce_claro,
+        }
+    finally:
+        wb.close()
+
 def calcular_produccion_desde_xlsx(path: str | Path) -> dict:
     """Calcula producción DIRECTAMENTE desde el XLSX exacto exportado de ESACOM.
 
@@ -166,24 +304,26 @@ def calcular_produccion_desde_xlsx(path: str | Path) -> dict:
             fija_filas_control += 1
 
         mmap = mapa(movil_rows[0])
-        nombre_evt_movil = "NOMBRE EVT" if cabecera("NOMBRE EVT") in mmap else "NOMBRE EJECUTIVO"
-        requeridos_movil = ["SUPERVISOR", nombre_evt_movil, "PPAL/ADICI.", "FECHA ACTIVACIÓN", "ESTADO"]
+        requeridos_movil = ["SUPERVISOR", "PPAL/ADICI.", "FECHA ACTIVACIÓN", "ESTADO"]
         faltantes = [h for h in requeridos_movil if cabecera(h) not in mmap]
+        if not tiene_alias(mmap, "NOMBRE EVT", "NOMBRE EJECUTIVO"):
+            faltantes.append("NOMBRE EVT/NOMBRE EJECUTIVO")
         if faltantes:
             raise RuntimeError(f"Faltan columnas en Ventas Móvil: {', '.join(faltantes)}")
 
         movil_filas = movil_efectivas = movil_pendientes = 0
         for row in movil_rows[1:]:
             tipo = tipo_movil(valor(row, mmap, "PPAL/ADICI."))
+            evt_fuente = valor_alias(row, mmap, "NOMBRE EVT", "NOMBRE EJECUTIVO")
             if tipo == "otros" and not any(
-                str(valor(row, mmap, h) or "").strip() for h in ("SUPERVISOR", nombre_evt_movil)
+                str(x or "").strip() for x in (valor(row, mmap, "SUPERVISOR"), evt_fuente)
             ):
                 continue
             movil_filas += 1
             estado = valor(row, mmap, "ESTADO")
             fecha_activacion = valor(row, mmap, "FECHA ACTIVACIÓN")
             sup = str(valor(row, mmap, "SUPERVISOR") or "SIN SUPERVISOR").strip()
-            evt = str(valor(row, mmap, nombre_evt_movil) or "SIN EJECUTIVO").strip()
+            evt = str(evt_fuente or "SIN EJECUTIVO").strip()
             if not movil_efectiva(estado, fecha_activacion):
                 movil_pendientes += 1
                 for b in (global_, por_sup[sup], por_sup_evt[sup][evt]):

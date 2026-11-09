@@ -23,7 +23,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 
 from catalogos.views import ComunaViewSet, PromocionViewSet
 from integraciones.views import CargaExcelViewSet, ClaroImportViewSet, KPIRegistroViewSet, MetaKPICalidadViewSet, cargar_excel_view, sincronizar_google_sheets_view
-from usuarios.views import AuditoriaUsuarioViewSet, EjecutivoViewSet, LogoutView, RutTokenObtainPairView, UsuarioSoporteViewSet, PermisosUsuarioViewSet
+from usuarios.views import AuditoriaUsuarioViewSet, EjecutivoViewSet, LogoutView, RutTokenObtainPairView, UsuarioSoporteViewSet, PermisosUsuarioViewSet, auditoria_rrhh_view
 from core.views import estado_sistema
 from ventas.views import (
     ApelacionViewSet,
@@ -85,4 +85,5 @@ urlpatterns = [
     path('api/equipo/resumen/', resumen_equipo_view, name='equipo-resumen'),
     path('api/integraciones/cargar-excel/', cargar_excel_view, name='cargar-excel'),
     path('api/integraciones/sincronizar-google-sheets/', sincronizar_google_sheets_view, name='sincronizar-google-sheets'),
+    path('api/rrhh/auditoria/', auditoria_rrhh_view, name='auditoria-rrhh'),
 ]

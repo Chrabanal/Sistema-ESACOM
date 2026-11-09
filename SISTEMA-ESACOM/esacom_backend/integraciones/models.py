@@ -51,6 +51,7 @@ class CargaExcel(models.Model):
     class DiaReporte(models.TextChoices):
         LUNES = "LUNES", "Lunes"
         MIERCOLES = "MIERCOLES", "Miércoles"
+        JUEVES = "JUEVES", "Jueves"
         OTRO = "OTRO", "Otro"
 
     class EstadoReporte(models.TextChoices):
@@ -170,6 +171,12 @@ class KPIRegistro(models.Model):
     diferencia_propietario = models.BooleanField(default=False)
     ejecutivo_kpi_no_resuelto = models.BooleanField(default=False)
 
+    # Snapshot ESACOM al momento exacto de cargar este reporte KPI.
+    # ESACOM es la fuente maestra de población, RGU, ejecutivo y supervisor;
+    # Claro solo aporta el estado de Calidad. Este JSON evita que una sync
+    # posterior de la matriz cambie retroactivamente un KPI ya cargado.
+    snapshot_esacom = models.JSONField(null=True, blank=True)
+
     # Registro íntegro de origen para auditoría (campos extra que no
     # promovemos a columnas del sistema).
     raw_data = models.JSONField(default=dict, blank=True)
@@ -187,6 +194,9 @@ class KPIRegistro(models.Model):
         indexes = [
             models.Index(fields=["num_pedido", "camada", "boleta"], name="integracion_num_ped_9c50e2_idx"),
             models.Index(fields=["cruce_ok", "camada", "boleta"], name="integracion_cruce_o_7a8d20_idx"),
+            models.Index(fields=["carga", "camada", "boleta", "cruce_ok"], name="kpi_carga_camada_bol_ok_idx"),
+            models.Index(fields=["camada", "boleta", "carga"], name="kpi_camada_bol_carga_idx"),
+            models.Index(fields=["carga", "boleta", "marca_mes_kpi", "camada"], name="kpi_carga_bol_marca_cam_idx"),
         ]
         ordering = ["-importado_en", "num_pedido", "boleta"]
 

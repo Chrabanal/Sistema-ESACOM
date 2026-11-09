@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+﻿import { useEffect, useRef, useState } from "react";
 import Layout from "../components/Layout";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -9,6 +9,7 @@ import {
   fetchAuditoria,
   fetchResumenUsuarios,
   fetchUsuarios,
+  descargarInformeAccesos,
   fetchDotacion,
   resetPassword,
   sincronizarGoogleSheets,
@@ -240,12 +241,37 @@ export default function DashboardSoporte() {
   const [tipoKpi, setTipoKpi] = useState("");
   const [tab, setTab] = useState("usuarios");
   const [cargando, setCargando] = useState(true);
+  const [descargandoAccesos, setDescargandoAccesos] = useState(false);
   const [error, setError] = useState("");
   const [modal, setModal] = useState({ abierto: false, usuario: null });
   const [mensaje, setMensaje] = useState("");
   const [sincronizandoEsacom, setSincronizandoEsacom] = useState(false);
   const [ultimaSyncManual, setUltimaSyncManual] = useState(null);
   const primeraBusqueda = useRef(true);
+
+
+  async function descargarAccesos() {
+    if (descargandoAccesos) return;
+
+    setDescargandoAccesos(true);
+    setError("");
+
+    try {
+      await descargarInformeAccesos({
+        q,
+        cargo,
+        estado,
+        tipo_kpi: tipoKpi,
+      });
+
+      setMensaje("Informe de accesos descargado correctamente.");
+    } catch (err) {
+      console.error("Error al descargar accesos:", err);
+      setError("No se pudo descargar el informe de accesos.");
+    } finally {
+      setDescargandoAccesos(false);
+    }
+  }
 
   async function cargarTodo(parametros = {}) {
     setCargando(true);
@@ -389,6 +415,14 @@ export default function DashboardSoporte() {
           <select value={cargo} onChange={(e) => setCargo(e.target.value)} className="input-soporte bg-white lg:w-44"><option value="">Todos los roles</option>{ROLES.map((r) => <option key={r}>{r}</option>)}</select>
           <select value={estado} onChange={(e) => setEstado(e.target.value)} className="input-soporte bg-white lg:w-40"><option value="">Todos</option><option value="activo">Activos</option><option value="inactivo">Inactivos</option></select>
           <select value={tipoKpi} onChange={(e) => setTipoKpi(e.target.value)} className="input-soporte bg-white lg:w-40"><option value="">Todos KPI</option><option value="REGULAR">Regular</option><option value="HONORARIOS">Honorarios</option></select>
+          <button
+            type="button"
+            onClick={descargarAccesos}
+            disabled={descargandoAccesos}
+            className="px-4 py-2 rounded-lg border border-green-600 bg-green-50 text-green-700 hover:bg-green-100 text-sm font-semibold whitespace-nowrap disabled:opacity-50"
+          >
+            {descargandoAccesos ? "Descargando..." : "Descargar informe de accesos"}
+          </button>
           <button onClick={() => setModal({ abierto: true, usuario: null })} className="px-4 py-2 rounded-lg bg-esacom-red text-white text-sm font-semibold whitespace-nowrap">+ Crear usuario</button>
         </div>
 
