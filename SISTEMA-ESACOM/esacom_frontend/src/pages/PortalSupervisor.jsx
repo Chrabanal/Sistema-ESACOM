@@ -2527,6 +2527,9 @@ export default function PortalSupervisor() {
                       </p>
                     </div>
                   </div>
+                  <span className="mt-3 flex min-h-10 items-center justify-center rounded-xl border border-lime-200 bg-lime-50 text-xs font-extrabold text-lime-900 md:ml-auto md:w-fit md:px-4">
+                    Ver cliente y seguimiento →
+                  </span>
                 </button>
               ),
             )}
