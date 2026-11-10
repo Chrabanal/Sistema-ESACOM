@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import KpiCard from "../components/KpiCard";
 import ClienteDetalleModal from "../components/ClienteDetalleModal";
+import TarjetasEstadoComercial from "../components/TarjetasEstadoComercial";
 import { MotivosPendienteBarChart, UrgenciaBarChart } from "../components/DashboardCharts";
 import VencimientoPrimeraBoletaChart from "../components/VencimientoPrimeraBoletaChart";
 import { fetchAccionables, fetchDashboardKpiCompleto } from "../api/dashboard";
@@ -429,6 +430,7 @@ export default function PortalEjecutivo() {
   const [cortesB1, setCortesB1] = useState(null);
   const [errorCortesB1, setErrorCortesB1] = useState("");
   const [filtroClientes, setFiltroClientes] = useState("TODOS_ACTIVOS");
+  const [ordenClientes, setOrdenClientes] = useState("NOMBRE");
   const [busqueda, setBusqueda] = useState("");
   const [error, setError] = useState("");
   const [ventaDetalle, setVentaDetalle] = useState(null);
@@ -582,14 +584,14 @@ export default function PortalEjecutivo() {
 
     return base.filter((venta) => {
       if (
-        filtroClientes === "TODOS_ACTIVOS" &&
+        ["TODOS_ACTIVOS", "NUEVOS"].includes(filtroClientes) &&
         venta.estado_instalacion === "ANULADO"
       ) {
         return false;
       }
 
       if (
-        !["TODOS_ACTIVOS", "ACTIVOS_PAGO"].includes(filtroClientes) &&
+        !["TODOS_ACTIVOS", "NUEVOS", "ACTIVOS_PAGO"].includes(filtroClientes) &&
         venta.estado_instalacion !== filtroClientes
       ) {
         return false;
@@ -598,7 +600,7 @@ export default function PortalEjecutivo() {
       if (!q) return true;
 
       const texto = normalizarBusqueda(
-        [venta.nombre_cliente, venta.rut_cliente]
+        [venta.nombre_cliente, venta.rut_cliente, venta.n_pedido]
           .filter(Boolean)
           .join(" ")
       );
@@ -606,13 +608,18 @@ export default function PortalEjecutivo() {
       return q
         .split(/\s+/)
         .every((parte) => texto.includes(parte));
+    }).sort((a, b) => {
+      if (ordenClientes === "FECHA_VENTA") return String(b.fecha_venta || "").localeCompare(String(a.fecha_venta || ""));
+      if (ordenClientes === "ESTADO") return String(a.estado_instalacion || "").localeCompare(String(b.estado_instalacion || ""));
+      return String(a.nombre_cliente || "").localeCompare(String(b.nombre_cliente || ""), "es");
     });
-  }, [clientesMes, clientesActivosMes, filtroClientes, q]);
+  }, [clientesMes, clientesActivosMes, filtroClientes, q, ordenClientes]);
 
   const conteosClientes = useMemo(() => {
     const base = clientesMes || [];
 
     return {
+      NUEVOS: base.filter((v) => v.estado_instalacion !== "ANULADO").length,
       TODOS_ACTIVOS: base.filter(
         (v) => v.estado_instalacion !== "ANULADO"
       ).length,
@@ -693,7 +700,7 @@ export default function PortalEjecutivo() {
           </button>
         </div>
         <div className="relative mt-4">
-          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar por RUT o nombre…" className="w-full min-h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 pr-10 text-sm outline-none focus:border-esacom-lime focus:ring-2 focus:ring-esacom-lime/20" />
+          <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar cliente por nombre, RUT o número de pedido…" className="w-full min-h-12 rounded-2xl border border-gray-200 bg-gray-50 px-4 pr-10 text-sm outline-none focus:border-esacom-lime focus:ring-2 focus:ring-esacom-lime/20" />
           {busqueda && <button type="button" aria-label="Limpiar búsqueda" onClick={() => setBusqueda("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">✕</button>}
         </div>
         {q.length >= 2 && (
@@ -1076,69 +1083,37 @@ export default function PortalEjecutivo() {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
-
-              {[
-                {
-                  key: "TODOS_ACTIVOS",
-                  label: "Todos activos",
-                  count: conteosClientes.TODOS_ACTIVOS,
-                  activo: "border-blue-500 bg-blue-50 text-blue-800 ring-blue-100",
-                },
-                {
-                  key: "INSTALADO",
-                  label: "Instalados",
-                  count: conteosClientes.INSTALADO,
-                  activo: "border-green-500 bg-green-50 text-green-800 ring-green-100",
-                },
-                {
-                  key: "PENDIENTE_INSTALACION",
-                  label: "Pend. instalación",
-                  count: conteosClientes.PENDIENTE_INSTALACION,
-                  activo: "border-orange-500 bg-orange-50 text-orange-800 ring-orange-100",
-                },
-                {
-                  key: "PENDIENTE_COMERCIAL",
-                  label: "Pend. comercial",
-                  count: conteosClientes.PENDIENTE_COMERCIAL,
-                  activo: "border-yellow-500 bg-yellow-50 text-yellow-800 ring-yellow-100",
-                },
-                {
-                  key: "ACTIVOS_PAGO",
-                  label: "Pagaron",
-                  count: conteosClientes.ACTIVOS_PAGO,
-                  activo: "border-emerald-500 bg-emerald-50 text-emerald-800 ring-emerald-100",
-                },
-                {
-                  key: "ANULADO",
-                  label: "Anulados",
-                  count: conteosClientes.ANULADO,
-                  activo: "border-red-500 bg-red-50 text-red-800 ring-red-100",
-                },
-              ].map((item) => {
-                const seleccionado = filtroClientes === item.key;
-
-                return (
-                  <button
-                    key={item.key}
-                    type="button"
-                    onClick={() => { setFiltroClientes(item.key); setFechaVencimientoSeleccionada(null); }}
-                    className={`rounded-xl border p-3 text-left transition ${
-                      seleccionado
-                        ? `${item.activo} ring-2`
-                        : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50"
-                    }`}
-                  >
-                    <p className="text-2xl font-black">
-                      {item.count}
-                    </p>
-
-                    <p className="mt-1 text-[10px] font-bold uppercase tracking-wide">
-                      {item.label}
-                    </p>
-                  </button>
-                );
-              })}
+            <div className="mt-4 rounded-2xl border border-lime-200 bg-lime-50/70 p-3 sm:p-4">
+              <p className="text-xs font-extrabold text-lime-950">Estado comercial de tu cartera</p>
+              <p className="mt-1 text-xs text-lime-900/80">Selecciona una tarjeta para ver los clientes. «Del mes» muestra ventas vigentes; «Pagaron» es un filtro de pago que puede coincidir con otros estados.</p>
+            </div>
+            <div className="mt-3">
+              <TarjetasEstadoComercial
+                activo={filtroClientes}
+                onSeleccionar={(key) => { setFiltroClientes(key); setFechaVencimientoSeleccionada(null); }}
+                items={[
+                  { key: "NUEVOS", label: "Clientes del mes", valor: conteosClientes.NUEVOS, detalle: "Ventas vigentes del período", tono: "lima", icono: "＋" },
+                  { key: "INSTALADO", label: "Instalados", valor: conteosClientes.INSTALADO, detalle: "Servicio completado", tono: "verde", icono: "✓" },
+                  { key: "PENDIENTE_INSTALACION", label: "Pend. instalación", valor: conteosClientes.PENDIENTE_INSTALACION, detalle: "Esperan instalación", tono: "naranja", icono: "⌛" },
+                  { key: "PENDIENTE_COMERCIAL", label: "Pend. comercial", valor: conteosClientes.PENDIENTE_COMERCIAL, detalle: "Requieren seguimiento", tono: "azul", icono: "◎" },
+                  { key: "ACTIVOS_PAGO", label: "Pagaron", valor: conteosClientes.ACTIVOS_PAGO, detalle: "Pago informado para boleta vigente", tono: "verde", icono: "$" },
+                  { key: "ANULADO", label: "Anulados", valor: conteosClientes.ANULADO, detalle: "No vigentes", tono: "rojo", icono: "✕" },
+                ]}
+              />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-gray-200 bg-white p-3">
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={() => { setFiltroClientes("TODOS_ACTIVOS"); setBusqueda(""); }} className="min-h-10 rounded-xl bg-lime-100 px-3 text-xs font-bold text-lime-950 hover:bg-lime-200">Ver todos los activos</button>
+                <button type="button" onClick={() => { setFiltroClientes("PENDIENTE_COMERCIAL"); setBusqueda(""); }} className="min-h-10 rounded-xl bg-blue-50 px-3 text-xs font-bold text-blue-800 hover:bg-blue-100">Gestionar pendientes comerciales</button>
+              </div>
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-600">
+                Ordenar
+                <select aria-label="Ordenar clientes" value={ordenClientes} onChange={(e) => setOrdenClientes(e.target.value)} className="min-h-10 rounded-xl border border-gray-200 bg-white px-3 text-xs text-gray-900">
+                  <option value="NOMBRE">Nombre</option>
+                  <option value="FECHA_VENTA">Venta más reciente</option>
+                  <option value="ESTADO">Estado comercial</option>
+                </select>
+              </label>
             </div>
 
             <div className="mt-3 rounded-xl bg-gray-50 px-4 py-3">
@@ -1148,7 +1123,7 @@ export default function PortalEjecutivo() {
               </p>
 
               <p className="mt-0.5 text-[10px] text-gray-400">
-                {filtroClientes === "TODOS_ACTIVOS" &&
+                {["TODOS_ACTIVOS", "NUEVOS"].includes(filtroClientes) &&
                   "Clientes vigentes del mes, excluyendo anulados."}
 
                 {filtroClientes === "INSTALADO" &&
