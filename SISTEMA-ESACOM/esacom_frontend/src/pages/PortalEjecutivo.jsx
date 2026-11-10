@@ -3,6 +3,7 @@ import Layout from "../components/Layout";
 import KpiCard from "../components/KpiCard";
 import ClienteDetalleModal from "../components/ClienteDetalleModal";
 import TarjetasEstadoComercial from "../components/TarjetasEstadoComercial";
+import ClienteCardMovil from "../components/ClienteCardMovil";
 import { MotivosPendienteBarChart, UrgenciaBarChart } from "../components/DashboardCharts";
 import VencimientoPrimeraBoletaChart from "../components/VencimientoPrimeraBoletaChart";
 import { fetchAccionables, fetchDashboardKpiCompleto } from "../api/dashboard";
@@ -1252,7 +1253,19 @@ export default function PortalEjecutivo() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+            <div className="grid grid-cols-1 gap-3 sm:hidden">
+              {clientesFiltrados.map((v) => (
+                <ClienteCardMovil
+                  key={v.id}
+                  venta={v}
+                  onDetalle={setVentaDetalle}
+                  activoPago={filtroClientes === "ACTIVOS_PAGO"}
+                  mesSeleccionado={mesSeleccionado}
+                  boletaActivaMes={boletaActivaMes}
+                />
+              ))}
+            </div>
+            <div className="hidden grid-cols-1 gap-3 sm:grid sm:grid-cols-2 xl:grid-cols-3">
               {clientesFiltrados.map((v) => (
                 <ClienteCard
                   key={v.id}
