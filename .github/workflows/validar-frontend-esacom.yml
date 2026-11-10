@@ -1,0 +1,32 @@
+name: Validar frontend ESACOM
+
+on:
+  push:
+    branches:
+      - feature/ux-estado-comercial-20261110
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - "SISTEMA-ESACOM/esacom_frontend/**"
+      - ".github/workflows/validar-frontend-esacom.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: SISTEMA-ESACOM/esacom_frontend
+    steps:
+      - name: Obtener codigo
+        uses: actions/checkout@v4
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: SISTEMA-ESACOM/esacom_frontend/package-lock.json
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Compilar frontend
+        run: npm run build
