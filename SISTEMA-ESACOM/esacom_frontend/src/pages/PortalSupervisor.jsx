@@ -1053,6 +1053,20 @@ export default function PortalSupervisor() {
 
       {vistaSupervisor === "resumen" && (
         <>
+      <section className="mb-5 rounded-2xl border border-lime-200 bg-gradient-to-r from-lime-50 to-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-base font-extrabold text-gray-900">Estado comercial de tu equipo</h2>
+            <p className="mt-1 text-xs text-gray-600">Identifica rápidamente pendientes de instalación y casos comerciales por ejecutivo.</p>
+          </div>
+          <button type="button" onClick={() => setVistaSupervisor("cartera")} className="min-h-11 shrink-0 rounded-xl bg-lime-600 px-5 text-sm font-bold text-white shadow-sm hover:bg-lime-700">Revisar cartera →</button>
+        </div>
+        <div className="mt-4 grid grid-cols-3 gap-2">
+          <div className="rounded-xl bg-white p-3 text-center"><strong className="block text-xl font-black text-green-800">{actividadEquipo?.instaladas ?? 0}</strong><span className="text-[10px] font-semibold text-gray-600">Instaladas</span></div>
+          <div className="rounded-xl bg-white p-3 text-center"><strong className="block text-xl font-black text-orange-700">{casosPendientesInstalacion}</strong><span className="text-[10px] font-semibold text-gray-600">Pend. instalación</span></div>
+          <div className="rounded-xl bg-white p-3 text-center"><strong className="block text-xl font-black text-blue-700">{casosPendientesComercial}</strong><span className="text-[10px] font-semibold text-gray-600">Pend. comercial</span></div>
+        </div>
+      </section>
       <section className="mb-7" id="vision-general">
         <div className="mb-3">
           <h2 className="text-base font-extrabold text-gray-900">
