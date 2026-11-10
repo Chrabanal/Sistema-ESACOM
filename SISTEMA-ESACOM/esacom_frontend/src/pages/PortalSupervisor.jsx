@@ -519,10 +519,6 @@ export default function PortalSupervisor() {
             page_size: 1000,
           };
 
-          if (estado) {
-            params.estado_instalacion = estado;
-          }
-
           if (
             periodoCartera === "MES_ACTUAL"
             && resumen?.mes_actual
@@ -626,10 +622,6 @@ export default function PortalSupervisor() {
     const params = {
       page_size: 1000,
     };
-
-    if (estado) {
-      params.estado_instalacion = estado;
-    }
 
     if (
       periodoCartera === "MES_ACTUAL"
@@ -791,6 +783,8 @@ export default function PortalSupervisor() {
     useMemo(
       () =>
         (ventas || []).filter((v) => {
+          if (estado === "NUEVOS" && v.estado_instalacion === "ANULADO") return false;
+          if (estado && estado !== "NUEVOS" && v.estado_instalacion !== estado) return false;
           const ownerId =
             v.ejecutivo?.id;
 
@@ -852,6 +846,7 @@ export default function PortalSupervisor() {
         perfilKpi,
         busqueda,
         ordenCartera,
+        estado,
       ],
     );
 
@@ -2241,7 +2236,7 @@ export default function PortalSupervisor() {
           <p className="mb-3 text-xs text-gray-500">Toca un estado para filtrar la cartera. «Del período» y los estados de instalación no representan categorías adicionales que deban sumarse.</p>
           <TarjetasEstadoComercial
             activo={estado || "TODOS"}
-            onSeleccionar={(key) => setEstado(key === "TODOS" || key === "NUEVOS" ? "" : key)}
+            onSeleccionar={(key) => setEstado(key === "TODOS" ? "" : key)}
             items={[
               { key: "TODOS", label: "Toda la cartera", valor: conteosEstadoComercial.TODOS, detalle: "En la selección actual", tono: "lima", icono: "☷" },
               { key: "NUEVOS", label: "Del período", valor: conteosEstadoComercial.NUEVOS, detalle: "Ventas vigentes, sin anulados", tono: "verde", icono: "＋" },
@@ -2361,6 +2356,7 @@ export default function PortalSupervisor() {
           </label>
 
           <select
+            aria-label="Filtrar estado comercial"
             value={estado}
             onChange={(e) =>
               setEstado(
@@ -2369,6 +2365,7 @@ export default function PortalSupervisor() {
             }
             className="min-h-11 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm"
           >
+            <option value="NUEVOS">Ventas vigentes del período</option>
             {ESTADOS.map((e) => (
               <option
                 key={e.value}
