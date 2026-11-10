@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Layout from "../components/Layout";
 import ClienteDetalleModal from "../components/ClienteDetalleModal";
+import TarjetasEstadoComercial from "../components/TarjetasEstadoComercial";
 import {
   EstadoVentasDonut,
   RankingKpiBarChart,
@@ -483,6 +484,7 @@ export default function PortalSupervisor() {
   const [accionablesEquipo, setAccionablesEquipo] = useState(null);
 
   const [estado, setEstado] = useState("");
+  const [ordenCartera, setOrdenCartera] = useState("FECHA");
   const [perfilKpi, setPerfilKpi] = useState("");
   const [busqueda, setBusqueda] = useState("");
   const [busquedaEjecutivo, setBusquedaEjecutivo] = useState("");
@@ -769,6 +771,22 @@ export default function PortalSupervisor() {
     );
 
 
+  const conteosEstadoComercial = useMemo(() => {
+    const base = (ventas || []).filter((v) => {
+      if (ejecutivoFiltro && String(v.ejecutivo?.id || "") !== String(ejecutivoFiltro)) return false;
+      if (perfilKpi && (v.ejecutivo?.tipo_kpi || "REGULAR") !== perfilKpi) return false;
+      return true;
+    });
+    return {
+      TODOS: base.length,
+      NUEVOS: base.filter((v) => v.estado_instalacion !== "ANULADO").length,
+      INSTALADO: base.filter((v) => v.estado_instalacion === "INSTALADO").length,
+      PENDIENTE_INSTALACION: base.filter((v) => v.estado_instalacion === "PENDIENTE_INSTALACION").length,
+      PENDIENTE_COMERCIAL: base.filter((v) => v.estado_instalacion === "PENDIENTE_COMERCIAL").length,
+      ANULADO: base.filter((v) => v.estado_instalacion === "ANULADO").length,
+    };
+  }, [ventas, ejecutivoFiltro, perfilKpi]);
+
   const ventasFiltradas =
     useMemo(
       () =>
@@ -823,12 +841,17 @@ export default function PortalSupervisor() {
               .toLowerCase()
               .includes(q)
           );
+        }).sort((a, b) => {
+          if (ordenCartera === "NOMBRE") return String(a.nombre_cliente || "").localeCompare(String(b.nombre_cliente || ""), "es");
+          if (ordenCartera === "ESTADO") return String(a.estado_instalacion || "").localeCompare(String(b.estado_instalacion || ""));
+          return String(b.fecha_venta || "").localeCompare(String(a.fecha_venta || ""));
         }),
       [
         ventas,
         ejecutivoFiltro,
         perfilKpi,
         busqueda,
+        ordenCartera,
       ],
     );
 
@@ -2213,10 +2236,26 @@ export default function PortalSupervisor() {
           <h2 className="text-sm font-extrabold text-blue-900">Cartera del equipo</h2>
           <p className="mt-1 text-xs text-blue-800/80">Filtra clientes por ejecutivo, perfil y estado sin mezclarlo con el seguimiento KPI.</p>
         </div>
+        <div className="mb-4">
+          <h3 className="mb-2 text-sm font-extrabold text-gray-900">Estado comercial del equipo</h3>
+          <p className="mb-3 text-xs text-gray-500">Toca un estado para filtrar la cartera. «Del período» y los estados de instalación no representan categorías adicionales que deban sumarse.</p>
+          <TarjetasEstadoComercial
+            activo={estado || "TODOS"}
+            onSeleccionar={(key) => setEstado(key === "TODOS" || key === "NUEVOS" ? "" : key)}
+            items={[
+              { key: "TODOS", label: "Toda la cartera", valor: conteosEstadoComercial.TODOS, detalle: "En la selección actual", tono: "lima", icono: "☷" },
+              { key: "NUEVOS", label: "Del período", valor: conteosEstadoComercial.NUEVOS, detalle: "Ventas vigentes, sin anulados", tono: "verde", icono: "＋" },
+              { key: "INSTALADO", label: "Instalados", valor: conteosEstadoComercial.INSTALADO, detalle: "Servicio completado", tono: "verde", icono: "✓" },
+              { key: "PENDIENTE_INSTALACION", label: "Pend. instalación", valor: conteosEstadoComercial.PENDIENTE_INSTALACION, detalle: "En coordinación", tono: "naranja", icono: "⌛" },
+              { key: "PENDIENTE_COMERCIAL", label: "Pend. comercial", valor: conteosEstadoComercial.PENDIENTE_COMERCIAL, detalle: "Requieren gestión", tono: "azul", icono: "◎" },
+              { key: "ANULADO", label: "Anulados", valor: conteosEstadoComercial.ANULADO, detalle: "Ventas anuladas", tono: "rojo", icono: "✕" },
+            ]}
+          />
+        </div>
         <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>
             <h3 className="text-base font-extrabold text-gray-900">
-              Clientes y ventas
+              Clientes y ventas ({ventasFiltradas.length})
             </h3>
 
             <p className="text-xs text-gray-500">
@@ -2312,6 +2351,15 @@ export default function PortalSupervisor() {
             </option>
           </select>
 
+          <label className="flex flex-col gap-1 text-[11px] font-semibold text-gray-600">
+            Ordenar clientes
+            <select aria-label="Ordenar cartera" value={ordenCartera} onChange={(e) => setOrdenCartera(e.target.value)} className="min-h-11 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm">
+              <option value="FECHA">Venta más reciente</option>
+              <option value="NOMBRE">Nombre</option>
+              <option value="ESTADO">Estado comercial</option>
+            </select>
+          </label>
+
           <select
             value={estado}
             onChange={(e) =>
@@ -2349,7 +2397,7 @@ export default function PortalSupervisor() {
         {ventas
           && ventasFiltradas.length
             > 0 && (
-          <div className="space-y-2">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {ventasFiltradas.map(
               (v) => (
                 <button
@@ -2360,7 +2408,7 @@ export default function PortalSupervisor() {
                     )
                   }
                   key={v.id}
-                  className="w-full rounded-2xl border border-gray-200 bg-white p-4 text-left transition hover:border-gray-300 hover:shadow-sm active:scale-[0.998]"
+                  className="w-full rounded-2xl border border-gray-200 border-l-4 border-l-lime-400 bg-white p-4 text-left shadow-sm transition hover:border-l-lime-500 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-lime-600 active:scale-[0.998]"
                 >
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
